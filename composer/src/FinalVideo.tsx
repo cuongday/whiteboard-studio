@@ -26,8 +26,8 @@ export const FinalVideo: React.FC<VideoProps> = ({ scenes, captions, music }) =>
     <Series>
       {scenes.map((s, i) => (
         <Series.Sequence key={i} durationInFrames={s.durationInFrames}>
-          <OffthreadVideo src={staticFile(s.clip)} muted />
-          <Audio src={staticFile(s.audio)} />
+          <OffthreadVideo src={staticFile(s.clip)} muted delayRenderRetries={3} delayRenderTimeoutInMilliseconds={60000} />
+          <Audio src={staticFile(s.audio)} delayRenderRetries={3} />
           {captions && <Captions words={s.words} />}
         </Series.Sequence>
       ))}

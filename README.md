@@ -37,6 +37,9 @@ Biến tuỳ chọn khác:
 | `VIENEU_MODE` | `v3turbo` |
 | `STUDIO_VOICE_WORKERS` | `4` (số bản VieNeu đọc song song, mỗi bản ~1,5 GB RAM) |
 | `STUDIO_DRAW_WORKERS` | 3/8 số nhân CPU, tối đa 8 (số cảnh vẽ song song) |
+| `STUDIO_RENDER_CONCURRENCY` | `50%` (số tab Chrome Remotion dùng khi ghép video) |
+| `STUDIO_OFFTHREAD_CACHE_MB` | `1024` (bộ nhớ đệm khung hình của Remotion) |
+| `STUDIO_RENDER_ATTEMPTS` | `2` (tự render lại khi gặp lỗi mạng/tải file tạm thời) |
 | `STUDIO_IMAGE_WORKERS` | `4` (số ảnh Gemini tạo song song) |
 | `STUDIO_PROJECTS_DIR` | thư mục `projects/` ở gốc repo |
 
@@ -63,6 +66,8 @@ Cổng mặc định là 8010; đổi bằng `make run PORT=9000`. Chế độ p
 Mọi thứ nằm dưới `projects/<id>/`: `project.json`, thư mục từng cảnh (ảnh, wav, `words.json`, clip vẽ) và `final.mp4`. Kết quả từng cảnh được cache nên chỉ cảnh thay đổi mới bị làm lại.
 
 ## Xử lý sự cố
+
+- **Remotion lỗi `ERR_NETWORK_CHANGED` / `Failed to fetch`**: Chrome mất kết nối tới server file nội bộ của Remotion khi card mạng ảo thay đổi (container Docker khởi động lại liên tục, VPN) hoặc khi máy hết RAM/swap. Tool tự thử lại 1 lần; nếu vẫn lỗi, giải phóng RAM, dừng container đang restart lặp, rồi bấm render lại.
 
 - **Lỗi ADC / credentials**: chạy lại `gcloud auth application-default login`, kiểm tra `GOOGLE_CLOUD_PROJECT`/`ADC_HOST_PATH` trong `.env` và đã bật `aiplatform.googleapis.com`.
 - **Lần đầu dùng VieNeu** mất khoảng 20-40 giây để tải model.
