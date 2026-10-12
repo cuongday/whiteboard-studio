@@ -1,6 +1,5 @@
 import importlib.util
 import shutil
-import subprocess
 from . import config
 
 def run_checks() -> list[dict]:

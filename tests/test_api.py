@@ -80,3 +80,47 @@ def test_reset_stale(monkeypatch):
     app_mod.reset_stale()
     p = store.load(pid)
     assert p.stage == "images" and p.scenes[0].status["image"] == "pending"
+
+def _flow_to_images(c, r):
+    pid = c.post("/api/projects", data={"title": "T", "text": "Giá tăng. Tiền giảm.", "aspect": "16:9"}).json()["id"]
+    wait(r)
+    c.post(f"/api/projects/{pid}/approve/scenes"); wait(r)
+    return pid
+
+def test_renumbering_moves_dirs(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _flow_to_images(c, r)
+    p = c.get(f"/api/projects/{pid}").json()
+    assert [s["id"] for s in p["scenes"]] == ["01", "02"]
+    (store.project_dir(pid) / "scenes" / "02" / "marker.txt").write_text("B")
+    res = c.put(f"/api/projects/{pid}/scenes", json=[p["scenes"][1]]).json()
+    assert [s["id"] for s in res["scenes"]] == ["01"]
+    assert res["scenes"][0]["status"]["image"] == "done"
+    sd = store.project_dir(pid) / "scenes"
+    assert (sd / "01" / "marker.txt").read_text() == "B"
+    assert not (sd / "02").exists()
+
+def test_client_status_ignored(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _mk(c, r)
+    sc = c.get(f"/api/projects/{pid}").json()["scenes"][0]
+    sc["id"] = "new"; sc["status"] = {"image": "done", "voice": "done", "draw": "done"}
+    res = c.put(f"/api/projects/{pid}/scenes", json=[sc]).json()
+    assert res["scenes"][0]["status"] == {"image": "pending", "voice": "pending", "draw": "pending"}
+
+def test_elements_only_change(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _flow_to_images(c, r)
+    sc = c.get(f"/api/projects/{pid}").json()["scenes"]
+    sc[0]["elements"] = [{"label": "x", "say": "y"}]
+    res = c.put(f"/api/projects/{pid}/scenes", json=sc).json()["scenes"][0]
+    assert res["status"]["image"] == "done" and res["status"]["draw"] == "pending"
+
+def test_regenerate_busy_no_mutation(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _mk(c, r)
+    before = store.load(pid).scenes[0].image_prompt
+    r.busy = True
+    assert c.post(f"/api/projects/{pid}/scenes/01/regenerate", json={"image_prompt": "zzz"}).status_code == 409
+    r.busy = False
+    assert store.load(pid).scenes[0].image_prompt == before

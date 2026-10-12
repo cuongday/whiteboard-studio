@@ -1,6 +1,8 @@
 import asyncio
 import json
+import os
 import re
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -12,7 +14,7 @@ from .checks import run_checks
 from .ingest import extract_text
 from .jobs import JOBS
 from .llm import build_image_prompt
-from .models import Scene, Settings
+from .models import STEPS, Scene, Settings
 from .pipeline import invalidate
 
 def reset_stale() -> None:
@@ -77,6 +79,7 @@ def project(pid: str):
 async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form("16:9"),
                  voice: str = Form("Hải Đăng"), captions: bool = Form(True), music: bool = Form(False),
                  file: UploadFile | None = File(None), music_file: UploadFile | None = File(None)):
+    _busy_check()
     try:
         source = extract_text(file.filename, await file.read()) if file and file.filename else text.strip()
     except ValueError as e:
@@ -101,20 +104,49 @@ def update_scenes(pid: str, scenes: list[Scene]):
     if p.stage not in ("scenes", "images", "done"):
         raise HTTPException(409, "Không thể sửa cảnh lúc này")
     old = {s.id: s for s in p.scenes}
-    new = []
-    for i, s in enumerate(scenes, 1):
-        prev = old.get(s.id)
-        s.id = f"{i:02d}"
-        if prev is None or (prev.visual_description, prev.elements) != (s.visual_description, s.elements):
-            s.image_prompt = build_image_prompt(s); invalidate(s, "image")
-        elif prev.text != s.text:
-            s.status = dict(prev.status); invalidate(s, "voice")
+    used: set[str] = set()
+    new, moves = [], {}
+    for i, inc in enumerate(scenes, 1):
+        nid = f"{i:02d}"
+        prev = old.get(inc.id) if inc.id not in used else None
+        if prev is None:
+            s = inc.model_copy(update={"id": nid, "status": {k: "pending" for k in STEPS},
+                                       "error": None, "duration_ms": None})
+            s.image_prompt = build_image_prompt(s)
+        else:
+            used.add(inc.id)
+            s = inc.model_copy(update={"id": nid, "status": dict(prev.status), "error": prev.error,
+                                       "duration_ms": prev.duration_ms})
+            if prev.visual_description != s.visual_description:
+                s.image_prompt = build_image_prompt(s); invalidate(s, "image")
+            elif prev.elements != s.elements:
+                s.image_prompt = prev.image_prompt if not inc.image_prompt else inc.image_prompt
+                invalidate(s, "draw")
+            if prev.text != s.text:
+                invalidate(s, "voice")
+            moves[nid] = prev.id
         new.append(s)
+    _move_scene_dirs(pid, set(old), moves)
     p.scenes = new
     if p.stage == "done":
         p.stage = "images"
+        p.final = None
     store.save(p)
     return p.model_dump()
+
+def _move_scene_dirs(pid, old_ids, moves):
+    base = store.project_dir(pid) / "scenes"
+    if not base.exists():
+        return
+    referenced = set(moves.values())
+    for oid in old_ids - referenced:
+        shutil.rmtree(base / oid, ignore_errors=True)
+    for oid in referenced:
+        if (base / oid).exists():
+            os.replace(base / oid, base / f"_tmp_{oid}")
+    for nid, oid in moves.items():
+        if (base / f"_tmp_{oid}").exists():
+            os.replace(base / f"_tmp_{oid}", base / nid)
 
 @app.put("/api/projects/{pid}/settings")
 def update_settings(pid: str, settings: Settings):
@@ -123,13 +155,19 @@ def update_settings(pid: str, settings: Settings):
     if settings.voice != p.settings.voice:
         for s in p.scenes:
             if s.status["voice"] == "done": invalidate(s, "voice")
+    if settings.aspect != p.settings.aspect:
+        for s in p.scenes: invalidate(s, "image")
+        p.final = None
     settings.music_file = settings.music_file or p.settings.music_file
     p.settings = settings; store.save(p)
     return p.model_dump()
 
 @app.post("/api/projects/{pid}/approve/scenes")
 def approve_scenes(pid: str):
-    _get(pid); _submit(pid, "images"); return {"ok": True}
+    p = _get(pid)
+    if p.stage not in ("scenes", "images"):
+        raise HTTPException(409, "Không thể thực hiện ở bước này")
+    _submit(pid, "images"); return {"ok": True}
 
 class Regen(BaseModel):
     image_prompt: str | None = None
@@ -137,6 +175,7 @@ class Regen(BaseModel):
 @app.post("/api/projects/{pid}/scenes/{sid}/regenerate")
 def regenerate(pid: str, sid: str, body: Regen):
     p = _get(pid)
+    _busy_check()
     s = next((x for x in p.scenes if x.id == sid), None)
     if not s: raise HTTPException(404, "Không có cảnh")
     if body.image_prompt: s.image_prompt = body.image_prompt
@@ -144,7 +183,10 @@ def regenerate(pid: str, sid: str, body: Regen):
 
 @app.post("/api/projects/{pid}/render")
 def render(pid: str):
-    _get(pid); _submit(pid, "render"); return {"ok": True}
+    p = _get(pid)
+    if p.stage not in ("images", "done"):
+        raise HTTPException(409, "Không thể thực hiện ở bước này")
+    _submit(pid, "render"); return {"ok": True}
 
 @app.get("/api/projects/{pid}/events")
 async def events(pid: str):
