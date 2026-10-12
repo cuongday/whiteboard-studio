@@ -53,7 +53,9 @@ class JobRunner:
                 self.last_progress = ev
                 self.emit(ev)
             deps.progress = progress
-            fn = {"segment": pipeline.run_segment, "images": pipeline.run_images, "render": pipeline.run_render}[kind]
+            fn = {"segment": pipeline.run_segment, "images": pipeline.run_images, "render": pipeline.run_render,
+                  "compose": pipeline.run_compose, "rebuild_scene": pipeline.run_rebuild_scene,
+                  "new_version": pipeline.run_new_version}[kind]
             fn(pid, deps, **kw)
             ev = {"pid": pid, "type": "done", "msg": kind, "pct": 1}
         except Exception as e:  # noqa: BLE001

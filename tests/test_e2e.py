@@ -3,7 +3,7 @@ import subprocess
 import pytest
 import numpy as np
 import soundfile as sf
-from studio import config, pipeline, store
+from studio import config, pipeline, store, versions
 from studio.models import Element, Scene, Settings
 from tests.test_annotate import make_scene
 
@@ -34,7 +34,7 @@ def test_e2e_two_scenes():
     pipeline.run_segment(p.id, d)
     pipeline.run_images(p.id, d)
     pipeline.run_render(p.id, d)
-    out = store.project_dir(p.id) / "final.mp4"
+    out = versions.vdir(p.id, "v1") / "final.mp4"
     probe = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(out)]))
     kinds = {s["codec_type"] for s in probe["streams"]}
     v = next(s for s in probe["streams"] if s["codec_type"] == "video")

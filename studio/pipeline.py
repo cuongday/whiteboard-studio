@@ -10,8 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 import cv2
-from . import annotate as annotate_mod, compose, config, draw, llm, store, voice
-from .models import STEPS, Scene
+from . import annotate as annotate_mod, compose, config, draw, llm, store, versions, voice
 
 @dataclass
 class Deps:
@@ -21,6 +20,7 @@ class Deps:
     annotate: Callable = annotate_mod.build_annotation
     draw: Callable = draw.render_clip
     render: Callable = compose.render_final
+    preview: Callable = compose.make_preview
     progress: Callable[[str, float], None] = field(default=lambda msg, pct: None)
 
 IMAGE_WORKERS = int(os.environ.get("STUDIO_IMAGE_WORKERS", "4"))
@@ -28,11 +28,6 @@ IMAGE_WORKERS = int(os.environ.get("STUDIO_IMAGE_WORKERS", "4"))
 # the bounding-box optimisation in vendor/render_stream_whiteboard.py): ~1 core each
 DRAW_WORKERS = int(os.environ.get("STUDIO_DRAW_WORKERS", str(max(1, min(8, (os.cpu_count() or 2) * 3 // 8)))))
 _SAVE_LOCK = threading.Lock()   # steps run on worker threads but share one Project
-
-def invalidate(scene: Scene, from_step: str) -> None:
-    for s in STEPS[STEPS.index(from_step):]:
-        scene.status[s] = "pending"
-    scene.error = None
 
 def _fit(path, size):
     w, h = size
@@ -48,29 +43,31 @@ def run_segment(pid: str, deps: Deps) -> None:
     p = store.load(pid)
     deps.progress("Đang chia cảnh…", 0.1)
     p.scenes = deps.segment(p.source_text, p.settings.aspect, model=p.settings.text_model)
-    p.final = None
+    for v in p.versions:
+        v.scenes = {}; v.final = None
+    versions.ensure(p)
     p.stage = "scenes"
     store.save(p)
 
-def _step(p, scene, step, fn, deps, i, n, label):
+def _step(p, holder, sid, step, fn, deps, i, n, label):
     with _SAVE_LOCK:
-        scene.status[step] = "running"; store.save(p)
-    deps.progress(f"{label} cảnh {scene.id} ({i + 1}/{n})", i / n)
+        holder.status[step] = "running"; store.save(p)
+    deps.progress(f"{label} cảnh {sid} ({i + 1}/{n})", i / n)
     try:
         fn()
         ok, err = True, None
     except Exception as e:  # noqa: BLE001 — isolate per-scene failures
         ok, err = False, f"{step}: {e}"
     with _SAVE_LOCK:
-        scene.status[step] = "done" if ok else "error"; scene.error = err
+        holder.status[step] = "done" if ok else "error"; holder.error = err
+        if hasattr(holder, "composed"):
+            holder.composed = False
         store.save(p)
     return ok
 
 def run_images(pid: str, deps: Deps, only: list[str] | None = None, model: str | None = None) -> None:
     p = store.load(pid)
     todo = [s for s in p.scenes if (only is not None and s.id in only) or (only is None and s.status["image"] != "done")]
-    if only is not None:
-        p.final = None
     def one(i, s):
         out = store.scene_dir(pid, s.id) / "image.png"
         def work():
@@ -78,66 +75,120 @@ def run_images(pid: str, deps: Deps, only: list[str] | None = None, model: str |
             deps.gen_image(s.image_prompt, p.settings.aspect, out, model=used)
             s.image_model = used
             _fit(out, config.ASPECTS[p.settings.aspect])
-        _step(p, s, "image", work, deps, i, len(todo), "Vẽ ảnh")
+        _step(p, s, s.id, "image", work, deps, i, len(todo), "Vẽ ảnh")
     if only is not None:
         for s in todo:
-            invalidate(s, "image")
+            versions.invalidate_scene(p, s.id, "image")
     # Gemini calls are network-bound: generate several images at once
     with ThreadPoolExecutor(max_workers=max(1, IMAGE_WORKERS)) as ex:
         list(ex.map(one, range(len(todo)), todo))
-    p.stage = "images"
+    if p.stage != "done":
+        p.stage = "images"
     store.save(p)
 
-def run_render(pid: str, deps: Deps) -> None:
-    p = store.load(pid)
-    p.stage = "rendering"; p.job_error = None; p.final = None; store.save(p)
-    n = len(p.scenes)
+def _build(p, v, deps, sids: list[str]) -> None:
+    """Narrate (pending) and draw (pending) the given scenes of version v; preview after each draw."""
+    pid = p.id
+    by_id = {s.id: s for s in p.scenes}
+    n = len(sids)
+    order = {sid: i for i, sid in enumerate(sids)}
 
-    def draw_scene(i, s, d):
+    def draw_scene(s):
+        vs = v.scenes[s.id]; d = versions.vscene_dir(pid, v.id, s.id)
         def dr():
-            words = json.loads((d / "words.json").read_text(encoding="utf-8"))
-            ann = deps.annotate(d / "image.png", s.elements, words, s.duration_ms)
-            deps.draw(d / "image.png", ann, d / "clip.mp4", fps=config.FPS)
-        _step(p, s, "draw", dr, deps, i, n, "Vẽ animation")
+            src = d / "narration.json" if (d / "narration.json").exists() else d / "words.json"
+            narr_words = json.loads(src.read_text(encoding="utf-8"))
+            spans = json.loads((d / "spans.json").read_text()) if (d / "spans.json").exists() else None
+            words = voice.subtitle_words(s.text, versions.narration_of(s), narr_words, spans)
+            (d / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
+            img = store.scene_dir(pid, s.id) / "image.png"
+            ann = deps.annotate(img, s.elements, words, vs.duration_ms)
+            deps.draw(img, ann, d / "clip.mp4", fps=config.FPS)
+            deps.preview(d / "clip.mp4", d / "voice.wav", d / "preview.mp4")
+        _step(p, vs, s.id, "draw", dr, deps, order[s.id], n, "Vẽ animation")
 
-    def voice_scene(i, s, d):
-        def v():
-            deps.synth(s.text, p.settings.voice, d / "voice.wav")
-            s.duration_ms = voice.wav_duration_ms(d / "voice.wav")
-        if not _step(p, s, "voice", v, deps, i, n, "Đọc"):
+    def voice_scene(s):
+        vs = v.scenes[s.id]; d = versions.vscene_dir(pid, v.id, s.id)
+        def vo():
+            deps.synth(versions.narration_of(s), versions.effective_voice(v, vs), d / "voice.wav")
+            os.replace(d / "words.json", d / "narration.json")
+            vs.duration_ms = voice.wav_duration_ms(d / "voice.wav")
+        if not _step(p, vs, s.id, "voice", vo, deps, order[s.id], n, "Đọc"):
             return
         with _SAVE_LOCK:
-            s.status["draw"] = "pending"
-        draws.append(draw_pool.submit(draw_scene, i, s, d))
+            vs.status["draw"] = "pending"
+        draws.append(draw_pool.submit(draw_scene, s))
 
-    # Narration (several VieNeu instances) and whiteboard drawing run in two pools; each
-    # scene's drawing starts as soon as its own narration is ready.
     draws: list = []
     with ThreadPoolExecutor(max_workers=max(1, DRAW_WORKERS)) as draw_pool, \
          ThreadPoolExecutor(max_workers=max(1, voice.VOICE_WORKERS)) as voice_pool:
         voices = []
-        for i, s in enumerate(p.scenes):
-            d = store.scene_dir(pid, s.id)
+        for sid in sids:
+            s = by_id[sid]; vs = v.scenes[sid]
             if s.status["image"] != "done":
                 with _SAVE_LOCK:
-                    s.status["voice"] = "error"; s.error = "Chưa có ảnh"; store.save(p)
+                    vs.status["voice"] = "error"; vs.error = "Chưa có ảnh"; store.save(p)
                 continue
-            if s.status["voice"] != "done":
-                voices.append(voice_pool.submit(voice_scene, i, s, d))
-            elif s.status["draw"] != "done":
-                draws.append(draw_pool.submit(draw_scene, i, s, d))
+            if vs.status["voice"] != "done":
+                voices.append(voice_pool.submit(voice_scene, s))
+            elif vs.status["draw"] != "done":
+                draws.append(draw_pool.submit(draw_scene, s))
         for f in voices:
             f.result()
         voice_pool.shutdown(wait=True)
         for f in list(draws):
             f.result()
-    if any(s.status["draw"] != "done" or s.status["voice"] != "done" for s in p.scenes):
-        p.stage = "images"; p.job_error = "Một số cảnh lỗi, hãy xem và thử lại"; store.save(p)
-        raise RuntimeError(p.job_error)
+
+def _all_built(v) -> bool:
+    return all(vs.status["voice"] == "done" and vs.status["draw"] == "done" for vs in v.scenes.values())
+
+def _compose(p, v, deps) -> None:
     deps.progress("Đang ghép video…", 0.9)
     try:
-        deps.render(p, on_progress=lambda f: deps.progress("Đang ghép video…", 0.9 + 0.1 * f))
+        deps.render(p, v.id, on_progress=lambda f: deps.progress("Đang ghép video…", 0.9 + 0.1 * f))
     except Exception as e:  # noqa: BLE001
-        p.stage = "images"; p.job_error = f"Lỗi ghép video: {e}"; store.save(p)
+        p.stage = "done" if any(x.final for x in p.versions) else "images"
+        p.job_error = f"Lỗi ghép video: {e}"; store.save(p)
         raise
-    p.final = "final.mp4"; p.stage = "done"; store.save(p)
+    v.final = f"versions/{v.id}/final.mp4"
+    for vs in v.scenes.values():
+        vs.composed = True
+    p.stage = "done"; store.save(p)
+
+def _build_and_compose(p, v, deps) -> None:
+    p.active_version = v.id; p.job_error = None
+    if p.stage != "done":
+        p.stage = "rendering"
+    store.save(p)
+    _build(p, v, deps, [s.id for s in p.scenes])
+    if not _all_built(v):
+        p.stage = "done" if any(x.final for x in p.versions) else "images"
+        p.job_error = "Một số cảnh lỗi, hãy xem và thử lại"; store.save(p)
+        raise RuntimeError(p.job_error)
+    _compose(p, v, deps)
+
+def run_render(pid: str, deps: Deps) -> None:
+    p = store.load(pid)
+    p.stage = "rendering"
+    _build_and_compose(p, versions.get(p), deps)
+
+def run_compose(pid: str, deps: Deps, version: str) -> None:
+    p = store.load(pid)
+    _build_and_compose(p, versions.get(p, version), deps)
+
+def run_rebuild_scene(pid: str, deps: Deps, version: str, scene: str) -> None:
+    p = store.load(pid)
+    v = versions.get(p, version); vs = v.scenes[scene]
+    p.active_version = v.id; p.job_error = None
+    if vs.status["voice"] == "done" and vs.status["draw"] == "done":
+        vs.status["draw"] = "pending"          # explicit rebuild = redraw
+    store.save(p)
+    _build(p, v, deps, [scene])
+    if vs.status["draw"] != "done":
+        p.job_error = vs.error or "Dựng lại cảnh thất bại"; store.save(p)
+        raise RuntimeError(p.job_error)
+
+def run_new_version(pid: str, deps: Deps, voice: str) -> None:
+    p = store.load(pid)
+    v = versions.add_version(p, voice)
+    _build_and_compose(p, v, deps)

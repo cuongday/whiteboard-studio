@@ -9,13 +9,12 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from . import config, store
+from . import config, store, versions
 from .checks import run_checks
 from .ingest import extract_text
 from .jobs import JOBS, job_alive_elsewhere
 from .llm import build_image_prompt
 from .models import STEPS, Scene, Settings
-from .pipeline import invalidate
 
 def reset_stale() -> None:
     """Reset state left over from a crash: running steps -> pending, rendering -> images."""
@@ -148,12 +147,12 @@ def update_scenes(pid: str, scenes: list[Scene]):
             s = inc.model_copy(update={"id": nid, "status": dict(prev.status), "error": prev.error,
                                        "duration_ms": prev.duration_ms})
             if prev.visual_description != s.visual_description:
-                s.image_prompt = build_image_prompt(s); invalidate(s, "image")
+                s.image_prompt = build_image_prompt(s); s.status["image"] = "pending"; s.error = None; versions.invalidate_scene(p, s.id, "image")
             elif prev.elements != s.elements:
                 s.image_prompt = prev.image_prompt if not inc.image_prompt else inc.image_prompt
-                invalidate(s, "draw")
+                versions.invalidate_scene(p, s.id, "draw")
             if prev.text != s.text:
-                invalidate(s, "voice")
+                versions.invalidate_scene(p, s.id, "voice")
             moves[nid] = prev.id
         new.append(s)
     _move_scene_dirs(pid, set(old), moves)
@@ -186,9 +185,9 @@ def update_settings(pid: str, settings: Settings):
     invalidated = False
     if settings.voice != p.settings.voice:
         for s_ in p.scenes:
-            if s_.status["voice"] == "done": invalidate(s_, "voice"); invalidated = True
+            if s_.status["voice"] == "done": versions.invalidate_scene(p, s_.id, "voice"); invalidated = True
     if settings.aspect != p.settings.aspect:
-        for s_ in p.scenes: invalidate(s_, "image")
+        for s_ in p.scenes: versions.invalidate_scene(p, s_.id, "image")
         invalidated = True
     if invalidated:
         p.final = None
