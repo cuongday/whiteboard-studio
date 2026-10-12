@@ -1,0 +1,8 @@
+.superpowers/
+projects/
+.venv/
+node_modules/
+__pycache__/
+composer/out/
+frontend/dist/
+*.egg-info/
