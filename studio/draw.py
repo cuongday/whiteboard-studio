@@ -1,4 +1,6 @@
 import json
+
+import cv2
 import subprocess
 import sys
 from pathlib import Path
@@ -6,9 +8,10 @@ from pathlib import Path
 RENDERER = Path(__file__).resolve().parent / "vendor" / "render_stream_whiteboard.py"
 
 def _image_size(image: Path) -> tuple[int, int]:
-    from PIL import Image
-    with Image.open(image) as im:
-        return im.height, im.width
+    img = cv2.imread(str(image))
+    if img is None:
+        raise RuntimeError(f"Không đọc được ảnh: {image}")
+    return img.shape[:2]
 
 
 def render_clip(image: Path, annotation: dict, out: Path, fps: int = 30) -> Path:
