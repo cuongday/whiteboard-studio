@@ -9,6 +9,15 @@ SRT = "1\n00:00:01,000 --> 00:00:03,000\nXin chào\n\n2\n00:00:03,500 --> 00:00:
 def test_txt():
     assert extract_text("a.txt", "Lạm phát là gì?".encode()) == "Lạm phát là gì?"
 
+def test_cp1258_not_decoded_as_utf16():
+    text = "Xin chào ban đ"
+    data = text.encode("cp1258")
+    assert len(data) % 2 == 0  # even length: the old utf-16 path would accept it
+    assert extract_text("a.txt", data) == text
+
+def test_utf16_with_bom():
+    assert extract_text("a.txt", "Xin chào".encode("utf-16")) == "Xin chào"
+
 def test_srt_strips_timestamps():
     assert extract_text("a.srt", SRT.encode()) == "Xin chào\nThế giới"
 

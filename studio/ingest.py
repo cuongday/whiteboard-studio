@@ -5,7 +5,11 @@ from pathlib import Path
 _TS = re.compile(r"^\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->")
 
 def _decode(data: bytes) -> str:
-    for enc in ("utf-8-sig", "utf-16", "cp1258"):
+    encodings = ["utf-8-sig"]
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        encodings.append("utf-16")
+    encodings.append("cp1258")
+    for enc in encodings:
         try:
             return data.decode(enc)
         except UnicodeDecodeError:
