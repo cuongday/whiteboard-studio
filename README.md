@@ -61,6 +61,13 @@ Cổng mặc định là 8010; đổi bằng `make run PORT=9000`. Chế độ p
 5. **Cổng duyệt 2**: xem ảnh (tạo lại ảnh nào chưa ưng), duyệt để render.
 6. Hệ thống tổng hợp giọng, tính thời điểm vẽ, vẽ tay từng cảnh và ghép bằng Remotion thành `final.mp4`.
 
+## Bút vẽ
+
+Bàn tay cầm bút trong video mặc định là bút trắng trơn. Ở form tạo dự án (hoặc mục **Bút vẽ** trên màn Kết quả)
+nhập **chữ trên thân bút** (ví dụ tên kênh, tối đa 40 ký tự, hỗ trợ tiếng Việt) và chọn màu chữ; có xem trước ngay.
+Đổi bút trên dự án đã render sẽ vẽ lại mọi cảnh (giữ nguyên giọng), sau đó bấm **Ghép lại**.
+Ảnh bàn tay và script in chữ lấy từ vansyson/srt-whiteboard-animation (MIT); font Be Vietnam Pro (OFL, `studio/vendor/fonts/`).
+
 ## Sửa từng cảnh và phiên bản giọng
 
 Sau khi render, màn **Kết quả** hiện video cuối và lưới các cảnh (clip xem thử + phụ đề).

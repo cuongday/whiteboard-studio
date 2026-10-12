@@ -9,7 +9,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from . import config, store, versions, voice as voice_mod
+from . import config, store, versions, hand as hand_mod, voice as voice_mod
 from .checks import run_checks
 from .ingest import extract_text
 from .jobs import JOBS, job_alive_elsewhere
@@ -78,6 +78,18 @@ def _check_model(model: str | None, allowed) -> None:
     if model and model not in {m for m, _ in allowed}:
         raise HTTPException(400, f"Model không hỗ trợ: {model}")
 
+def _pen(text, color) -> dict:
+    t, c = hand_mod.normalize(text, color)
+    return {"pen_text": t, "pen_color": c}
+
+@app.get("/api/hand")
+def hand_preview(text: str = "", color: str = ""):
+    """PNG of the drawing hand with the given marker text (for the settings preview)."""
+    try:
+        return FileResponse(hand_mod.hand_png(text, color), media_type="image/png")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Không tạo được ảnh bút: {e}")
+
 @app.get("/api/voices")
 async def voices():
     from .voice import list_voices
@@ -106,6 +118,7 @@ def project(pid: str):
 async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form("16:9"),
                  voice: str = Form("Hải Đăng"), captions: bool = Form(True), music: bool = Form(False),
                  text_model: str = Form(""), image_model: str = Form(""),
+                 pen_text: str = Form(""), pen_color: str = Form(""),
                  file: UploadFile | None = File(None), music_file: UploadFile | None = File(None)):
     _busy_check()
     _check_model(text_model, config.TEXT_MODELS); _check_model(image_model, config.IMAGE_MODELS)
@@ -119,7 +132,8 @@ async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form
         raise HTTPException(400, "Cần nhập kịch bản hoặc tải file")
     p = store.create_project(title, Settings(aspect=aspect, voice=voice, captions=captions, music=music,
                                              text_model=text_model or config.TEXT_MODEL,
-                                             image_model=image_model or config.IMAGE_MODEL), source)
+                                             image_model=image_model or config.IMAGE_MODEL,
+                                             **_pen(pen_text, pen_color)), source)
     if music_file and music_file.filename:
         up = store.project_dir(p.id) / "uploads"; up.mkdir(parents=True, exist_ok=True)
         ext = Path(music_file.filename).suffix.lower()
@@ -196,6 +210,14 @@ def update_settings(pid: str, settings: Settings):
         invalidated = True
     if invalidated and p.stage == "done":
         p.stage = "images"
+    pen = _pen(settings.pen_text, settings.pen_color)
+    if (pen["pen_text"], pen["pen_color"]) != (p.settings.pen_text, p.settings.pen_color):
+        # the hand is drawn into every clip: redraw everything (voice is kept)
+        for s_ in p.scenes:
+            versions.invalidate_scene(p, s_.id, "draw")
+        if p.stage == "done":
+            p.stage = "images"
+    settings.pen_text, settings.pen_color = pen["pen_text"], pen["pen_color"]
     settings.music_file = p.settings.music_file
     p.settings = settings; store.save(p)
     return p.model_dump()

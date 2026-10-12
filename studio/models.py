@@ -49,6 +49,8 @@ class Settings(BaseModel):
     music_file: str | None = None
     text_model: str = Field(default_factory=lambda: config.TEXT_MODEL)
     image_model: str = Field(default_factory=lambda: config.IMAGE_MODEL)
+    pen_text: str = ""               # printed on the drawing hand's marker; empty = plain marker
+    pen_color: str = "#1f1f1f"
 
 class Project(BaseModel):
     id: str

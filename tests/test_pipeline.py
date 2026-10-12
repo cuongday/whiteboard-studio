@@ -21,7 +21,9 @@ def fake_synth(text, voice, out_wav):
     out_wav.with_name("words.json").write_text(json.dumps(words)); return words
 
 calls = []
-def fake_draw(image, ann, out, fps=30):
+hands = []
+def fake_draw(image, ann, out, fps=30, hand=None):
+    hands.append(hand)
     calls.append(out.parent.name); out.write_bytes(b"mp4"); return out
 
 def fake_render(p, vid, on_progress=None):
@@ -84,7 +86,7 @@ def test_render_draws_in_parallel(monkeypatch):
     import threading, time as _t
     monkeypatch.setattr(pipeline, "DRAW_WORKERS", 2)
     live, peak, lock = [0], [0], threading.Lock()
-    def slow_draw(image, ann, out, fps=30):
+    def slow_draw(image, ann, out, fps=30, hand=None):
         with lock:
             live[0] += 1; peak[0] = max(peak[0], live[0])
         _t.sleep(0.3)
@@ -206,3 +208,11 @@ def test_legacy_scene_keeps_narration_timing_across_redraws():
     assert (vd / "narration.json").read_text() == narr
     pipeline.run_rebuild_scene(pid, d, version="v1", scene="01")
     assert (vd / "narration.json").read_text() == narr
+
+def test_draw_uses_pen_text_hand(tmp_path, monkeypatch):
+    from studio import hand as hand_mod
+    monkeypatch.setattr(hand_mod, "CACHE", tmp_path)          # empty cache: both scenes race to create it
+    p = store.create_project("t", Settings(pen_text="Kênh A"), "x")
+    d = deps(); hands.clear()
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
+    assert len(hands) == 2 and hands[0] == hands[1] and hands[0] != hand_mod.CLEAN_HAND

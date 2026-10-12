@@ -292,3 +292,22 @@ def test_reset_stale_keeps_done_when_final_exists(monkeypatch):
     p = store.load(pid); p.stage = "rendering"; store.save(p)
     app_mod.reset_stale()
     assert store.load(pid).stage == "done"
+
+def test_pen_text_create_preview_and_settings(monkeypatch, tmp_path):
+    from studio import hand as hand_mod
+    monkeypatch.setattr(hand_mod, "CACHE", tmp_path)
+    c, r = client(monkeypatch)
+    res = c.get("/api/hand", params={"text": "Kênh Của Tôi", "color": "#1f5bff"})
+    assert res.status_code == 200 and res.headers["content-type"] == "image/png" and res.content[:4] == b"\x89PNG"
+    assert c.get("/api/hand").status_code == 200                       # plain marker
+    pid = c.post("/api/projects", data={"title": "T", "text": "Giá tăng. Tiền giảm.", "pen_text": "  Kênh   A ",
+                                        "pen_color": "nope"}).json()["id"]; wait(r)
+    st = c.get(f"/api/projects/{pid}").json()["settings"]
+    assert (st["pen_text"], st["pen_color"]) == ("Kênh A", hand_mod.DEFAULT_COLOR)
+    c.post(f"/api/projects/{pid}/approve/scenes"); wait(r)
+    c.post(f"/api/projects/{pid}/render"); wait(r)
+    st["pen_text"] = "Kênh B"
+    out = c.put(f"/api/projects/{pid}/settings", json=st).json()
+    assert out["settings"]["pen_text"] == "Kênh B" and out["stage"] == "images"
+    v = versions.get(store.load(pid))
+    assert all(vs.status == {"voice": "done", "draw": "pending"} for vs in v.scenes.values())

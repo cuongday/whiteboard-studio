@@ -10,3 +10,4 @@ composer/out/
 frontend/dist/
 *.egg-info/
 .env
+.cache/

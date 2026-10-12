@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, Project, VersionScene } from "../api";
 import CaptionedPreview from "../CaptionedPreview";
 import SceneEditor from "./SceneEditor";
+import PenSettings from "../PenSettings";
 
 type Props = { project: Project; busy: boolean; version: number; beginAction: () => void; afterAction: () => void;
   onChange: (p: Project) => void; onEdit: (m: "scenes" | "images") => void };
@@ -19,6 +20,7 @@ export default function ResultView({ project, busy, version, beginAction, afterA
   const [newVoice, setNewVoice] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [pen, setPen] = useState<{ text: string; color: string } | null>(null);
   const [missing, setMissing] = useState<Record<string, boolean>>({});
   useEffect(() => { api.voices().then(setVoices).catch(() => {}); }, []);
   const v = project.versions.find((x) => x.id === project.active_version) ?? project.versions[0];
@@ -62,6 +64,20 @@ export default function ResultView({ project, busy, version, beginAction, afterA
           </div>
         </div>
       )}
+      <details className="card pen-card" open={pen !== null} onToggle={(e) => {
+        if ((e.target as HTMLDetailsElement).open && !pen) setPen({ text: project.settings.pen_text, color: project.settings.pen_color });
+      }}>
+        <summary>Bút vẽ: {project.settings.pen_text ? `“${project.settings.pen_text}”` : "bút trơn"}</summary>
+        {pen && <>
+          <PenSettings text={pen.text} color={pen.color} onChange={(text, color) => setPen({ text, color })} />
+          <div className="row">
+            <button className="primary" disabled={busy || (pen.text.trim() === project.settings.pen_text && pen.color === project.settings.pen_color)}
+              onClick={() => run(async () => { onChange(await api.saveSettings(project.id, { ...project.settings, pen_text: pen.text, pen_color: pen.color })); })}>
+              Lưu bút vẽ</button>
+            <span className="muted small">Đổi bút sẽ vẽ lại mọi cảnh (giữ nguyên giọng), sau đó bấm "Ghép lại".</span>
+          </div>
+        </>}
+      </details>
       <h2>Các cảnh · {v.label}</h2>
       <div className={`thumbs ${project.settings.aspect === "9:16" ? "portrait" : ""}`}>
         {project.scenes.map((s) => {

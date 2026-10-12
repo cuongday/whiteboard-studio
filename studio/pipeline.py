@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 import cv2
+from . import hand as hand_mod
 from . import annotate as annotate_mod, compose, config, draw, llm, store, versions, voice
 
 @dataclass
@@ -109,7 +110,8 @@ def _build(p, v, deps, sids: list[str]) -> None:
             (d / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
             img = store.scene_dir(pid, s.id) / "image.png"
             ann = deps.annotate(img, s.elements, words, vs.duration_ms)
-            deps.draw(img, ann, d / "clip.mp4", fps=config.FPS)
+            deps.draw(img, ann, d / "clip.mp4", fps=config.FPS,
+                      hand=hand_mod.hand_png(p.settings.pen_text, p.settings.pen_color))
             deps.preview(d / "clip.mp4", d / "voice.wav", d / "preview.mp4")
             vs.built_at = time.time()
         _step(p, vs, s.id, "draw", dr, deps, order[s.id], n, "Vẽ animation")

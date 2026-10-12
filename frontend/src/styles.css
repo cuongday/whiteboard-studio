@@ -247,3 +247,17 @@ td.done { color: var(--ok); font-weight: 600; } td.error { color: var(--err); fo
 .el-row { display: grid; grid-template-columns: 1fr 1.4fr auto auto; gap: 6px; margin-bottom: 6px; }
 .el-row input { margin: 0; }
 @media (max-width: 600px) { .new-version { margin-left: 0; } .el-row { grid-template-columns: 1fr 1fr auto auto; } }
+
+/* ---------- pen (drawing hand) ---------- */
+.pen { display: flex; gap: 16px; align-items: center; margin: 8px 0 14px; padding: 12px; border-radius: var(--radius); background: var(--blue-soft); }
+.pen-preview { width: 84px; height: 116px; object-fit: contain; flex: none; }
+/* zoom on the marker barrel (hand image is 1069x1472; barrel spans ~x 330-900, y 230-720) */
+.pen-zoom { width: 150px; height: 116px; flex: none; border-radius: var(--radius-sm); background-color: #fff;
+  background-repeat: no-repeat; background-size: 280px auto; background-position: -86px -50px; box-shadow: inset 0 0 0 1px var(--line); }
+@media (max-width: 600px) { .pen-preview { display: none; } }
+.pen-fields { flex: 1; min-width: 0; }
+.pen-fields label { margin-top: 0; }
+.pen-colors { display: flex; gap: 8px; }
+.swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px var(--line); }
+.swatch.on { box-shadow: 0 0 0 3px var(--blue); }
+.pen-card summary { font-weight: 600; color: var(--ink); }

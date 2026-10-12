@@ -14,12 +14,15 @@ def _image_size(image: Path) -> tuple[int, int]:
     return img.shape[:2]
 
 
-def render_clip(image: Path, annotation: dict, out: Path, fps: int = 30) -> Path:
+def render_clip(image: Path, annotation: dict, out: Path, fps: int = 30, hand: Path | None = None) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     ann_path = out.with_name("annotation.json")
     ann_path.write_text(json.dumps(annotation, ensure_ascii=False, indent=2), encoding="utf-8")
     h, w = _image_size(image)
-    cmd = [sys.executable, str(RENDERER), str(image), str(ann_path), str(out),
+    if hand is None:
+        from .hand import CLEAN_HAND
+        hand = CLEAN_HAND
+    cmd = [sys.executable, str(RENDERER), str(image), str(ann_path), str(out), str(hand),
            "--fps", str(fps), "--total-ms", str(annotation["sceneDurationMs"]),
            "--cap-long-edge", str(max(h, w))]
     r = subprocess.run(cmd, capture_output=True, text=True)
