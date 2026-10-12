@@ -45,7 +45,8 @@ def _call(client, **kw):
         try:
             return client.models.generate_content(**kw)
         except errors.APIError as e:
-            if getattr(e, "code", None) in (429, 500, 503) and attempt < 3:
+            code = getattr(e, "code", None) or 0
+            if (code == 429 or code >= 500) and attempt < 3:
                 time.sleep(2 ** attempt * 2)
                 continue
             raise LLMError(f"Gemini lỗi: {e}") from e
