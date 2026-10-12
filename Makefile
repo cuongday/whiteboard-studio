@@ -5,7 +5,7 @@ setup:
 	cd composer && npm install
 	cd frontend && npm install
 dev:
-	.venv/bin/uvicorn studio.app:app --port $(PORT) --reload & cd frontend && npm run dev
+	.venv/bin/uvicorn studio.app:app --port $(PORT) --reload & UV=$$!; trap 'kill $$UV' EXIT INT TERM; cd frontend && npm run dev
 build:
 	cd frontend && npm run build
 run: build
