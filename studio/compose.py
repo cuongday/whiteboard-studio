@@ -32,6 +32,13 @@ RENDER_CONCURRENCY = os.environ.get("STUDIO_RENDER_CONCURRENCY", "50%")
 OFFTHREAD_CACHE_BYTES = int(os.environ.get("STUDIO_OFFTHREAD_CACHE_MB", "1024")) * 1024 * 1024
 
 def render_final(p: Project, vid: str, on_progress=None) -> Path:
+    """Final video with the engine chosen in project settings (ffmpeg by default)."""
+    if p.settings.composer == "ffmpeg":
+        from . import compose_ffmpeg
+        return compose_ffmpeg.render_final(p, vid, on_progress=on_progress)
+    return render_remotion(p, vid, on_progress=on_progress)
+
+def render_remotion(p: Project, vid: str, on_progress=None) -> Path:
     pdir = store.project_dir(p.id)
     vd = versions.vdir(p.id, vid)
     vd.mkdir(parents=True, exist_ok=True)

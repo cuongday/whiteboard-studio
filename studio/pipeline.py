@@ -152,9 +152,10 @@ def _all_built(v) -> bool:
     return all(vs.status["voice"] == "done" and vs.status["draw"] == "done" for vs in v.scenes.values())
 
 def _compose(p, v, deps) -> None:
-    deps.progress("Đang ghép video…", 0.9)
+    label = f"Đang ghép video ({'ffmpeg' if p.settings.composer == 'ffmpeg' else 'Remotion'})…"
+    deps.progress(label, 0.9)
     try:
-        deps.render(p, v.id, on_progress=lambda f: deps.progress("Đang ghép video…", 0.9 + 0.1 * f))
+        deps.render(p, v.id, on_progress=lambda f: deps.progress(label, 0.9 + 0.1 * f))
     except Exception as e:  # noqa: BLE001
         p.stage = "done" if any(x.final for x in p.versions) else "images"
         p.job_error = f"Lỗi ghép video: {e}"; store.save(p)

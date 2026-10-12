@@ -37,6 +37,8 @@ Biến tuỳ chọn khác:
 | `VIENEU_MODE` | `v3turbo` |
 | `STUDIO_VOICE_WORKERS` | `4` (số bản VieNeu đọc song song, mỗi bản ~1,5 GB RAM) |
 | `STUDIO_DRAW_WORKERS` | 3/8 số nhân CPU, tối đa 8 (số cảnh vẽ song song) |
+| `STUDIO_FFMPEG_PRESET` | `veryfast` (preset x264 khi ghép bằng ffmpeg) |
+| `STUDIO_FFMPEG_CRF` | `20` (chất lượng x264 khi ghép bằng ffmpeg; nhỏ hơn = nét hơn) |
 | `STUDIO_RENDER_CONCURRENCY` | `50%` (số tab Chrome Remotion dùng khi ghép video) |
 | `STUDIO_OFFTHREAD_CACHE_MB` | `1024` (bộ nhớ đệm khung hình của Remotion) |
 | `STUDIO_RENDER_ATTEMPTS` | `2` (tự render lại khi gặp lỗi mạng/tải file tạm thời) |
@@ -60,6 +62,15 @@ Cổng mặc định là 8010; đổi bằng `make run PORT=9000`. Chế độ p
 4. Sinh ảnh cho từng cảnh.
 5. **Cổng duyệt 2**: xem ảnh (tạo lại ảnh nào chưa ưng), duyệt để render.
 6. Hệ thống tổng hợp giọng, tính thời điểm vẽ, vẽ tay từng cảnh và ghép bằng Remotion thành `final.mp4`.
+
+## Ghép video: ffmpeg hoặc Remotion
+
+Chọn ở form tạo dự án, hoặc ngay cạnh nút **Ghép lại** trên màn Kết quả:
+
+- **ffmpeg** (mặc định): nối các clip, trộn giọng + nhạc nền (tự giảm khi có giọng), in phụ đề karaoke
+  (ASS, font Be Vietnam Pro) trong một lượt mã hoá. Dự án 11 cảnh / 127 giây: ~16 giây.
+- **Remotion**: dựng từng khung hình qua Chrome headless. Cùng dự án: ~5 phút. Giữ lại để so sánh
+  hoặc khi cần hiệu ứng React.
 
 ## Bút vẽ
 

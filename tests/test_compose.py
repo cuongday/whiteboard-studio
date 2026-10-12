@@ -37,7 +37,7 @@ def test_render_retries_transient_then_succeeds(tmp_projects, monkeypatch):
         (versions.vdir(p.id, "v1") / "final.mp4").write_bytes(b"x")
         return True, []
     monkeypatch.setattr(compose, "_run_remotion", fake_run)
-    assert compose.render_final(p, "v1").name == "final.mp4"
+    assert compose.render_remotion(p, "v1").name == "final.mp4"
     assert len(calls) == 2
     assert any(a.startswith("--offthreadvideo-cache-size-in-bytes=") for a in calls[0])
 
@@ -51,6 +51,6 @@ def test_render_non_transient_fails_fast_with_clean_message(tmp_projects, monkey
         return False, ["Rendered 1/20\n"] * 30 + ["TypeError: boom\n"]
     monkeypatch.setattr(compose, "_run_remotion", fake_run)
     with pytest.raises(RuntimeError) as e:
-        compose.render_final(p, "v1")
+        compose.render_remotion(p, "v1")
     assert len(calls) == 1
     assert "TypeError: boom" in str(e.value) and "Rendered 1/20" not in str(e.value)

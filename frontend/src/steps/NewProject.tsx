@@ -3,6 +3,7 @@ import { api, Project } from "../api";
 import { stageLabel } from "../labels";
 import { ModelSelect, useModels } from "../models";
 import PenSettings from "../PenSettings";
+import ComposerSelect from "../ComposerSelect";
 
 export default function NewProject({ list, onOpen, onCreated }: { list: Project[]; onOpen: (id: string) => void; onCreated: (p: Project) => void }) {
   const [err, setErr] = useState("");
@@ -11,6 +12,7 @@ export default function NewProject({ list, onOpen, onCreated }: { list: Project[
   const [textModel, setTextModel] = useState("");
   const [imageModel, setImageModel] = useState("");
   const [pen, setPen] = useState({ text: "", color: "#1f1f1f" });
+  const [composer, setComposer] = useState<"ffmpeg" | "remotion">("ffmpeg");
   const [voices, setVoices] = useState<{ id: string; label: string }[]>([{ id: "Hải Đăng", label: "Hải Đăng" }]);
   useEffect(() => { api.voices().then((v) => v.length && setVoices(v)).catch(() => {}); }, []);
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -47,6 +49,7 @@ export default function NewProject({ list, onOpen, onCreated }: { list: Project[
           <label className="check"><input type="checkbox" name="music" /> Nhạc nền</label>
           <label className="music-file">File nhạc nền (.mp3 .wav .m4a…)<input type="file" name="music_file" accept="audio/*" /></label>
         </div>
+        <div className="row"><ComposerSelect name="composer" value={composer} onChange={setComposer} /></div>
         <PenSettings text={pen.text} color={pen.color} names={{ text: "pen_text", color: "pen_color" }}
           onChange={(text, color) => setPen({ text, color })} />
         {err && <div className="error">{err}</div>}

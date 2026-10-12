@@ -3,7 +3,7 @@ export type StepState = "pending" | "running" | "done" | "error";
 export type Scene = { id: string; text: string; key_idea: string; visual_description: string; elements: Element[];
   image_prompt: string; status: Record<"image" | "voice" | "draw", StepState>; error: string | null; duration_ms: number | null; image_model?: string | null; image_at?: number | null; narration: string };
 export type Settings = { aspect: "16:9" | "9:16"; voice: string; captions: boolean; music: boolean; music_file: string | null;
-  text_model: string; image_model: string; pen_text: string; pen_color: string };
+  text_model: string; image_model: string; pen_text: string; pen_color: string; composer: "ffmpeg" | "remotion" };
 export type Project = { id: string; title: string; created_at: string; settings: Settings; source_text: string;
   stage: "input" | "scenes" | "images" | "rendering" | "done"; scenes: Scene[]; final: string | null; job_error: string | null; timings?: Record<string, number>;
   versions: Version[]; active_version: string };
@@ -51,7 +51,8 @@ export const api = {
     j<Project>(fetch(`/api/projects/${id}/versions/${vid}/scenes/${sid}`, { method: "PUT", headers: JSONH, body: JSON.stringify({ voice }) })),
   rebuildScene: (id: string, vid: string, sid: string) =>
     j(fetch(`/api/projects/${id}/versions/${vid}/scenes/${sid}/rebuild`, { method: "POST" })),
-  compose: (id: string, vid: string) => j(fetch(`/api/projects/${id}/versions/${vid}/compose`, { method: "POST" })),
+  compose: (id: string, vid: string, composer?: "ffmpeg" | "remotion") => j(fetch(`/api/projects/${id}/versions/${vid}/compose`,
+    { method: "POST", headers: JSONH, body: JSON.stringify({ composer }) })),
   newVersion: (id: string, voice: string) =>
     j(fetch(`/api/projects/${id}/versions`, { method: "POST", headers: JSONH, body: JSON.stringify({ voice }) })),
   setActive: (id: string, vid: string) =>

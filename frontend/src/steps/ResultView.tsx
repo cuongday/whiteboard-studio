@@ -3,6 +3,7 @@ import { api, Project, VersionScene } from "../api";
 import CaptionedPreview from "../CaptionedPreview";
 import SceneEditor from "./SceneEditor";
 import PenSettings from "../PenSettings";
+import ComposerSelect, { Composer } from "../ComposerSelect";
 
 type Props = { project: Project; busy: boolean; version: number; beginAction: () => void; afterAction: () => void;
   onChange: (p: Project) => void; onEdit: (m: "scenes" | "images") => void };
@@ -20,6 +21,7 @@ export default function ResultView({ project, busy, version, beginAction, afterA
   const [newVoice, setNewVoice] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [composer, setComposer] = useState<Composer | null>(null);
   const [pen, setPen] = useState<{ text: string; color: string } | null>(null);
   const [missing, setMissing] = useState<Record<string, boolean>>({});
   useEffect(() => { api.voices().then(setVoices).catch(() => {}); }, []);
@@ -49,9 +51,11 @@ export default function ResultView({ project, busy, version, beginAction, afterA
       {err && <div className="error">{err}</div>}
       {project.job_error && <div className="error">{project.job_error}</div>}
       {(dirty > 0 || !v.final) && (project.stage === "done" || project.stage === "images") && (
-        <div className="warn row between">
+        <div className="warn compose-bar">
           <span>{v.final ? `Có ${dirty} cảnh đã sửa, chưa ghép vào video.` : "Bản này chưa có video ghép."}</span>
-          <button className="primary" disabled={busy} onClick={() => run(() => api.compose(project.id, v.id))}>Ghép lại</button>
+          <ComposerSelect value={composer ?? project.settings.composer} onChange={setComposer} />
+          <button className="primary" disabled={busy}
+            onClick={() => run(() => api.compose(project.id, v.id, composer ?? project.settings.composer))}>Ghép lại</button>
         </div>
       )}
       {v.final && (

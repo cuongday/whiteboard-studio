@@ -58,3 +58,12 @@ def test_e2e_edit_scene_and_new_version():
     for f in (v1_final, v2_final):
         probe = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", str(f)]))
         assert abs(float(probe["format"]["duration"]) - 4.0) < 0.3
+
+def test_e2e_remotion_engine_still_works():
+    p = store.create_project("e2e-rem", Settings(aspect="16:9", captions=True, composer="remotion"), "x")
+    d = pipeline.Deps(segment=seg, gen_image=img, synth=synth)
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
+    from studio import versions
+    out = versions.vdir(p.id, "v1") / "final.mp4"
+    probe = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", str(out)]))
+    assert abs(float(probe["format"]["duration"]) - 4.0) < 0.3

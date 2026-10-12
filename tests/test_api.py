@@ -337,3 +337,13 @@ def test_regenerate_all_on_done_project_marks_redraw(monkeypatch):
     assert q.stage == "done"
     assert all(vs.status == {"voice": "done", "draw": "pending"} and not vs.composed
                for vs in versions.get(q).scenes.values())
+
+def test_compose_engine_choice(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = c.post("/api/projects", data={"title": "T", "text": "Giá tăng.", "composer": "remotion"}).json()["id"]; wait(r)
+    assert c.get(f"/api/projects/{pid}").json()["settings"]["composer"] == "remotion"
+    c.post(f"/api/projects/{pid}/approve/scenes"); wait(r)
+    c.post(f"/api/projects/{pid}/render"); wait(r)
+    assert c.post(f"/api/projects/{pid}/versions/v1/compose", json={"composer": "ffmpeg"}).status_code == 200; wait(r)
+    assert store.load(pid).settings.composer == "ffmpeg"
+    assert c.post(f"/api/projects/{pid}/versions/v1/compose", json={"composer": "bogus"}).status_code == 422

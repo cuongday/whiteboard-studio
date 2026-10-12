@@ -1,4 +1,5 @@
 import asyncio
+from typing import Literal
 import json
 import re
 import shutil
@@ -118,7 +119,7 @@ def project(pid: str):
 async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form("16:9"),
                  voice: str = Form("Hải Đăng"), captions: bool = Form(True), music: bool = Form(False),
                  text_model: str = Form(""), image_model: str = Form(""),
-                 pen_text: str = Form(""), pen_color: str = Form(""),
+                 pen_text: str = Form(""), pen_color: str = Form(""), composer: str = Form("ffmpeg"),
                  file: UploadFile | None = File(None), music_file: UploadFile | None = File(None)):
     _busy_check()
     _check_model(text_model, config.TEXT_MODELS); _check_model(image_model, config.IMAGE_MODELS)
@@ -133,6 +134,7 @@ async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form
     p = store.create_project(title, Settings(aspect=aspect, voice=voice, captions=captions, music=music,
                                              text_model=text_model or config.TEXT_MODEL,
                                              image_model=image_model or config.IMAGE_MODEL,
+                                             composer="remotion" if composer == "remotion" else "ffmpeg",
                                              **_pen(pen_text, pen_color)), source)
     if music_file and music_file.filename:
         up = store.project_dir(p.id) / "uploads"; up.mkdir(parents=True, exist_ok=True)
@@ -221,6 +223,9 @@ def update_settings(pid: str, settings: Settings):
     settings.music_file = p.settings.music_file
     p.settings = settings; store.save(p)
     return p.model_dump()
+
+class ComposeBody(BaseModel):
+    composer: Literal["ffmpeg", "remotion"] | None = None
 
 class ImagesBatch(BaseModel):
     image_model: str | None = None   # None = project default
@@ -334,10 +339,13 @@ def rebuild_scene(pid: str, vid: str, sid: str):
     _submit(pid, "rebuild_scene", version=vid, scene=sid); return {"ok": True}
 
 @app.post("/api/projects/{pid}/versions/{vid}/compose")
-def compose_version(pid: str, vid: str):
+def compose_version(pid: str, vid: str, body: ComposeBody | None = None):
     p = _get(pid); _version(p, vid)
     if p.stage not in ("images", "done"):
         raise HTTPException(409, "Không thể thực hiện ở bước này")
+    _busy_check()
+    if body and body.composer and body.composer != p.settings.composer:
+        p.settings.composer = body.composer; store.save(p)
     _submit(pid, "compose", version=vid); return {"ok": True}
 
 class NewVersion(BaseModel):

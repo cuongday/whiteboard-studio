@@ -51,6 +51,7 @@ class Settings(BaseModel):
     image_model: str = Field(default_factory=lambda: config.IMAGE_MODEL)
     pen_text: str = ""               # printed on the drawing hand's marker; empty = plain marker
     pen_color: str = "#1f1f1f"
+    composer: Literal["ffmpeg", "remotion"] = "ffmpeg"   # final-video engine: ffmpeg (fast) or Remotion
 
 class Project(BaseModel):
     id: str

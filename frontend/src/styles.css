@@ -266,3 +266,9 @@ td.done { color: var(--ok); font-weight: 600; } td.error { color: var(--err); fo
 .batch { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; border-left: 4px solid var(--violet); }
 .batch-info { display: flex; flex-direction: column; gap: 2px; margin-right: auto; }
 .batch label { margin: 0; min-width: 260px; flex: 0 1 320px; }
+
+/* ---------- compose bar ---------- */
+.compose-bar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.compose-bar > span { margin-right: auto; align-self: center; }
+.compose-bar label { margin: 0; min-width: 240px; color: inherit; }
+.compose-bar select { margin-top: 4px; background: #fff; }
