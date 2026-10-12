@@ -1,3 +1,8 @@
+"""Pipeline steps.
+
+NOTE: callers must not mutate the project (scenes/settings) while a job runs;
+jobs hold a stale Project and save the whole thing after each step.
+"""
 from dataclasses import dataclass, field
 from typing import Callable
 import cv2
@@ -24,7 +29,8 @@ def _fit(path, size):
     img = cv2.imread(str(path))
     ih, iw = img.shape[:2]
     scale = max(w / iw, h / ih)
-    img = cv2.resize(img, (round(iw * scale), round(ih * scale)), interpolation=cv2.INTER_AREA)
+    interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+    img = cv2.resize(img, (round(iw * scale), round(ih * scale)), interpolation=interp)
     y, x = (img.shape[0] - h) // 2, (img.shape[1] - w) // 2
     cv2.imwrite(str(path), img[y:y + h, x:x + w])
 
@@ -32,6 +38,7 @@ def run_segment(pid: str, deps: Deps) -> None:
     p = store.load(pid)
     deps.progress("Đang chia cảnh…", 0.1)
     p.scenes = deps.segment(p.source_text, p.settings.aspect)
+    p.final = None
     p.stage = "scenes"
     store.save(p)
 
@@ -48,9 +55,9 @@ def _step(p, scene, step, fn, deps, i, n, label):
 
 def run_images(pid: str, deps: Deps, only: list[str] | None = None) -> None:
     p = store.load(pid)
-    todo = [s for s in p.scenes if (only and s.id in only) or (not only and s.status["image"] != "done")]
+    todo = [s for s in p.scenes if (only is not None and s.id in only) or (only is None and s.status["image"] != "done")]
     for i, s in enumerate(todo):
-        if only:
+        if only is not None:
             invalidate(s, "image")
         out = store.scene_dir(pid, s.id) / "image.png"
         def work(s=s, out=out):
@@ -62,7 +69,7 @@ def run_images(pid: str, deps: Deps, only: list[str] | None = None) -> None:
 
 def run_render(pid: str, deps: Deps) -> None:
     p = store.load(pid)
-    p.stage = "rendering"; p.job_error = None; store.save(p)
+    p.stage = "rendering"; p.job_error = None; p.final = None; store.save(p)
     n = len(p.scenes)
     for i, s in enumerate(p.scenes):
         d = store.scene_dir(pid, s.id)
@@ -82,9 +89,13 @@ def run_render(pid: str, deps: Deps) -> None:
                 ann = deps.annotate(d / "image.png", s.elements, words, s.duration_ms)
                 deps.draw(d / "image.png", ann, d / "clip.mp4", fps=config.FPS)
             _step(p, s, "draw", dr, deps, i, n, "Vẽ animation")
-    if any(s.status["draw"] != "done" for s in p.scenes):
+    if any(s.status["draw"] != "done" or s.status["voice"] != "done" for s in p.scenes):
         p.stage = "images"; p.job_error = "Một số cảnh lỗi, hãy xem và thử lại"; store.save(p)
         raise RuntimeError(p.job_error)
     deps.progress("Đang ghép video…", 0.9)
-    deps.render(p, on_progress=lambda f: deps.progress("Đang ghép video…", 0.9 + 0.1 * f))
+    try:
+        deps.render(p, on_progress=lambda f: deps.progress("Đang ghép video…", 0.9 + 0.1 * f))
+    except Exception as e:  # noqa: BLE001
+        p.stage = "images"; p.job_error = f"Lỗi ghép video: {e}"; store.save(p)
+        raise
     p.final = "final.mp4"; p.stage = "done"; store.save(p)

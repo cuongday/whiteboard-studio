@@ -29,6 +29,7 @@ def deps():
                          render=fake_render, annotate=lambda img, els, words, dur: {"sceneDurationMs": dur, "elements": []})
 
 def test_full_flow_and_resume():
+    calls.clear()
     p = store.create_project("t", Settings(aspect="16:9"), "Giá tăng. Tiền giảm.")
     d = deps()
     pipeline.run_segment(p.id, d)
@@ -58,3 +59,15 @@ def test_scene_error_isolated():
     q = store.load(p.id)
     assert q.scenes[0].status["image"] == "done"
     assert q.scenes[1].status["image"] == "error" and "boom" in q.scenes[1].error
+
+def test_render_failure_resets_stage():
+    import pytest
+    p = store.create_project("t", Settings(aspect="16:9"), "x")
+    d = deps()
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d)
+    def bad_render(p, on_progress=None): raise RuntimeError("ffmpeg died")
+    d.render = bad_render
+    with pytest.raises(RuntimeError):
+        pipeline.run_render(p.id, d)
+    q = store.load(p.id)
+    assert q.stage == "images" and "Lỗi ghép video" in q.job_error
