@@ -75,7 +75,8 @@ def health():
 @app.get("/api/jobs")
 def jobs_state():
     busy = JOBS.busy
-    return {"busy": busy, "pid": JOBS.pid if busy else None}
+    return {"busy": busy, "pid": JOBS.pid if busy else None, "kind": JOBS.kind if busy else None,
+            "started_at": JOBS.started_at if busy else None}
 
 @app.get("/api/projects")
 def projects():

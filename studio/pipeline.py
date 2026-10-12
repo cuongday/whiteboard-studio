@@ -3,6 +3,10 @@
 NOTE: callers must not mutate the project (scenes/settings) while a job runs;
 jobs hold a stale Project and save the whole thing after each step.
 """
+import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 import cv2
@@ -18,6 +22,10 @@ class Deps:
     draw: Callable = draw.render_clip
     render: Callable = compose.render_final
     progress: Callable[[str, float], None] = field(default=lambda msg, pct: None)
+
+IMAGE_WORKERS = int(os.environ.get("STUDIO_IMAGE_WORKERS", "4"))
+DRAW_WORKERS = int(os.environ.get("STUDIO_DRAW_WORKERS", str(max(1, min(4, (os.cpu_count() or 2) // 4)))))
+_SAVE_LOCK = threading.Lock()   # steps run on worker threads but share one Project
 
 def invalidate(scene: Scene, from_step: str) -> None:
     for s in STEPS[STEPS.index(from_step):]:
@@ -43,29 +51,36 @@ def run_segment(pid: str, deps: Deps) -> None:
     store.save(p)
 
 def _step(p, scene, step, fn, deps, i, n, label):
-    scene.status[step] = "running"; store.save(p)
+    with _SAVE_LOCK:
+        scene.status[step] = "running"; store.save(p)
     deps.progress(f"{label} cảnh {scene.id} ({i + 1}/{n})", i / n)
     try:
         fn()
-        scene.status[step] = "done"; scene.error = None
+        ok, err = True, None
     except Exception as e:  # noqa: BLE001 — isolate per-scene failures
-        scene.status[step] = "error"; scene.error = f"{step}: {e}"
-    store.save(p)
-    return scene.status[step] == "done"
+        ok, err = False, f"{step}: {e}"
+    with _SAVE_LOCK:
+        scene.status[step] = "done" if ok else "error"; scene.error = err
+        store.save(p)
+    return ok
 
 def run_images(pid: str, deps: Deps, only: list[str] | None = None) -> None:
     p = store.load(pid)
     todo = [s for s in p.scenes if (only is not None and s.id in only) or (only is None and s.status["image"] != "done")]
     if only is not None:
         p.final = None
-    for i, s in enumerate(todo):
-        if only is not None:
-            invalidate(s, "image")
+    def one(i, s):
         out = store.scene_dir(pid, s.id) / "image.png"
-        def work(s=s, out=out):
+        def work():
             deps.gen_image(s.image_prompt, p.settings.aspect, out)
             _fit(out, config.ASPECTS[p.settings.aspect])
         _step(p, s, "image", work, deps, i, len(todo), "Vẽ ảnh")
+    if only is not None:
+        for s in todo:
+            invalidate(s, "image")
+    # Gemini calls are network-bound: generate several images at once
+    with ThreadPoolExecutor(max_workers=max(1, IMAGE_WORKERS)) as ex:
+        list(ex.map(one, range(len(todo)), todo))
     p.stage = "images"
     store.save(p)
 
@@ -73,24 +88,32 @@ def run_render(pid: str, deps: Deps) -> None:
     p = store.load(pid)
     p.stage = "rendering"; p.job_error = None; p.final = None; store.save(p)
     n = len(p.scenes)
-    for i, s in enumerate(p.scenes):
-        d = store.scene_dir(pid, s.id)
-        if s.status["image"] != "done":
-            s.status["voice"] = "error"; s.error = "Chưa có ảnh"; store.save(p); continue
-        if s.status["voice"] != "done":
-            def v(s=s, d=d):
-                deps.synth(s.text, p.settings.voice, d / "voice.wav")
-                s.duration_ms = voice.wav_duration_ms(d / "voice.wav")
-            if not _step(p, s, "voice", v, deps, i, n, "Đọc"):
+
+    def draw_scene(i, s, d):
+        def dr():
+            words = json.loads((d / "words.json").read_text(encoding="utf-8"))
+            ann = deps.annotate(d / "image.png", s.elements, words, s.duration_ms)
+            deps.draw(d / "image.png", ann, d / "clip.mp4", fps=config.FPS)
+        _step(p, s, "draw", dr, deps, i, n, "Vẽ animation")
+
+    # VieNeu runs one sentence at a time (model is not re-entrant), so voices stay
+    # sequential; each scene's whiteboard render starts on the pool as soon as its voice is ready.
+    with ThreadPoolExecutor(max_workers=max(1, DRAW_WORKERS)) as pool:
+        for i, s in enumerate(p.scenes):
+            d = store.scene_dir(pid, s.id)
+            if s.status["image"] != "done":
+                with _SAVE_LOCK:
+                    s.status["voice"] = "error"; s.error = "Chưa có ảnh"; store.save(p)
                 continue
-            s.status["draw"] = "pending"
-        if s.status["draw"] != "done":
-            def dr(s=s, d=d):
-                import json
-                words = json.loads((d / "words.json").read_text(encoding="utf-8"))
-                ann = deps.annotate(d / "image.png", s.elements, words, s.duration_ms)
-                deps.draw(d / "image.png", ann, d / "clip.mp4", fps=config.FPS)
-            _step(p, s, "draw", dr, deps, i, n, "Vẽ animation")
+            if s.status["voice"] != "done":
+                def v(s=s, d=d):
+                    deps.synth(s.text, p.settings.voice, d / "voice.wav")
+                    s.duration_ms = voice.wav_duration_ms(d / "voice.wav")
+                if not _step(p, s, "voice", v, deps, i, n, "Đọc"):
+                    continue
+                s.status["draw"] = "pending"
+            if s.status["draw"] != "done":
+                pool.submit(draw_scene, i, s, d)
     if any(s.status["draw"] != "done" or s.status["voice"] != "done" for s in p.scenes):
         p.stage = "images"; p.job_error = "Một số cảnh lỗi, hãy xem và thử lại"; store.save(p)
         raise RuntimeError(p.job_error)

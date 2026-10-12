@@ -128,12 +128,13 @@ def test_regenerate_busy_no_mutation(monkeypatch):
 def test_jobs_endpoint_and_resegment(monkeypatch):
     c, r = client(monkeypatch)
     pid = _mk(c, r)
-    assert c.get("/api/jobs").json() == {"busy": False, "pid": None}
-    r.busy = True; r.pid = pid
-    assert c.get("/api/jobs").json() == {"busy": True, "pid": pid}
+    assert c.get("/api/jobs").json() == {"busy": False, "pid": None, "kind": None, "started_at": None}
+    r.busy = True; r.pid = pid; r.kind = "render"; r.started_at = 100.0
+    assert c.get("/api/jobs").json() == {"busy": True, "pid": pid, "kind": "render", "started_at": 100.0}
     assert c.post(f"/api/projects/{pid}/segment").status_code == 409
-    r.busy = False; r.pid = None
+    r.busy = False; r.pid = None; r.kind = None; r.started_at = None
     assert c.post(f"/api/projects/{pid}/segment").status_code == 200; wait(r)
+    assert "segment" in c.get(f"/api/projects/{pid}").json()["timings"]
     assert store.load(pid).stage == "scenes"
     c.post(f"/api/projects/{pid}/approve/scenes"); wait(r)
     assert c.post(f"/api/projects/{pid}/segment").status_code == 409

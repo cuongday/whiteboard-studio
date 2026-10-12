@@ -33,7 +33,7 @@ export default function NewProject({ list, onOpen, onCreated }: { list: Project[
         <div className="row">
           <label className="check"><input type="checkbox" name="captions" defaultChecked /> Phụ đề karaoke</label>
           <label className="check"><input type="checkbox" name="music" /> Nhạc nền</label>
-          <input type="file" name="music_file" accept="audio/*" />
+          <label className="music-file">File nhạc nền (.mp3 .wav .m4a…)<input type="file" name="music_file" accept="audio/*" /></label>
         </div>
         {err && <div className="error">{err}</div>}
         <button disabled={busy}>{busy ? "Đang tạo…" : "Tạo & chia cảnh"}</button>

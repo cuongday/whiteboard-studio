@@ -26,7 +26,7 @@ export default function ImagesReview({ project, busy, tick, beginAction, afterAc
   const allDone = project.scenes.every((s) => s.status.image === "done");
   return (
     <div>
-      <h2>Bước 2 · Duyệt ảnh</h2>
+      <h2>Duyệt ảnh</h2>
       {err && <div className="error">{err}</div>}
       {project.job_error && <div className="error">{project.job_error}</div>}
       <div className={`thumbs ${project.settings.aspect === "9:16" ? "portrait" : ""}`}>

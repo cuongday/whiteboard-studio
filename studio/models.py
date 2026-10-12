@@ -37,3 +37,4 @@ class Project(BaseModel):
     scenes: list[Scene] = Field(default_factory=list)
     final: str | None = None
     job_error: str | None = None
+    timings: dict[str, float] = Field(default_factory=dict)   # seconds of the last run per job kind

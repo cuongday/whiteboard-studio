@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, JobEvent, Project } from "./api";
+import { api, JobEvent, JobState, Project } from "./api";
+import Timer from "./Timer";
+import Stepper from "./Stepper";
 import { stageLabel } from "./labels";
 import NewProject from "./steps/NewProject";
 import ScenesReview from "./steps/ScenesReview";
@@ -16,6 +18,7 @@ export default function App() {
   const [edit, setEdit] = useState<EditMode>(null);
   const [session, setSession] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<JobState | null>(null);
   const [tick, setTick] = useState(0);
   const [renderCount, setRenderCount] = useState(0);
   const [err, setErr] = useState("");
@@ -62,8 +65,10 @@ export default function App() {
     let alive = true;
     const t = async () => {
       let b = false;
-      try { const j = await api.jobs(); b = j.busy && j.pid === pid; } catch { return; }
+      let js: JobState;
+      try { js = await api.jobs(); b = js.busy && js.pid === pid; } catch { return; }
       if (!alive) return;
+      setJob(b ? js : null);
       setBusy(b);
       if (b || wasBusy.current || inputPending.current) await reload();
       if (wasBusy.current && !b) setTick((x) => x + 1);
@@ -88,12 +93,23 @@ export default function App() {
   const showRender = project && !showScenes && !showImages && (stage === "rendering" || stage === "done");
   return (
     <div className="app">
-      <header>
-        <h1 onClick={() => open(null)}>Whiteboard Studio</h1>
-        {project && <span className="muted">{project.title} · {project.settings.aspect} · {stageLabel(project.stage)}</span>}
+      <header className="topbar">
+        <button className="brand" onClick={() => open(null)} aria-label="Về danh sách dự án">
+          <span className="brand-mark" aria-hidden="true" />
+          <span>Whiteboard <em>Studio</em></span>
+        </button>
+        {project && <div className="crumb">
+          <span className="crumb-title">{project.title}</span>
+          <span className="pill">{project.settings.aspect}</span>
+          <span className={`pill stage-${project.stage}`}>{stageLabel(project.stage)}</span>
+        </div>}
       </header>
+      {project && <div className="statusbar">
+        <Stepper stage={project.stage} />
+        <Timer startedAt={job?.started_at ?? null} kind={job?.kind ?? null} timings={project.timings} />
+      </div>}
       {bad.length > 0 && <div className="warn">{bad.map((c) => <div key={c.name}>⚠ {c.name}: {c.hint}</div>)}</div>}
-      {ev && ev.type === "progress" && <div className="progress"><div style={{ width: `${ev.pct * 100}%` }} /><span>{ev.msg}</span></div>}
+      {ev && ev.type === "progress" && <div className="progress" role="progressbar" aria-valuenow={Math.round(ev.pct * 100)} aria-valuemin={0} aria-valuemax={100}><div style={{ width: `${ev.pct * 100}%` }} /><span>{ev.msg}</span><b>{Math.round(ev.pct * 100)}%</b></div>}
       {ev && ev.type === "error" && <div className="error">Lỗi: {ev.msg}</div>}
       {err && <div className="error">{err}</div>}
       {!project && <NewProject list={list} onCreated={open} onOpen={openById} />}
@@ -102,7 +118,7 @@ export default function App() {
             <div className="error">Chia cảnh thất bại: {project.job_error}</div>
             <div className="row"><button disabled={busy} onClick={retry}>Thử lại</button><button onClick={() => open(null)}>← Về danh sách</button></div>
           </div>
-        : <p className="muted">Gemini đang chia cảnh…</p>)}
+        : <div className="card waiting"><span className="spinner" aria-hidden="true" />Gemini đang đọc kịch bản và chia cảnh…</div>)}
       {showScenes && <ScenesReview key={`${project.id}:${session}`} project={project} busy={busy}
         onChange={setFromChild} beginAction={beginAction} afterAction={afterAction} />}
       {showImages && <ImagesReview project={project} busy={busy} tick={tick} beginAction={beginAction} afterAction={afterAction}

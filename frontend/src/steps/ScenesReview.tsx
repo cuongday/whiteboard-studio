@@ -43,7 +43,7 @@ export default function ScenesReview({ project, busy, onChange, beginAction, aft
   const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
   return (
     <div>
-      <h2>Bước 1 · Duyệt chia cảnh ({rows.length} cảnh)</h2>
+      <h2>Duyệt chia cảnh ({rows.length} cảnh)</h2>
       {rows.map((r, i) => (
         <div className="card scene" key={i}>
           <div className="row between"><b>Cảnh {i + 1}</b><span className="muted">~{Math.round(words(r.s.text) / 4)} giây</span></div>

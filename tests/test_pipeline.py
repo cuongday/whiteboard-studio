@@ -71,3 +71,20 @@ def test_render_failure_resets_stage():
         pipeline.run_render(p.id, d)
     q = store.load(p.id)
     assert q.stage == "images" and "Lỗi ghép video" in q.job_error
+
+def test_render_draws_in_parallel(monkeypatch):
+    import threading, time as _t
+    monkeypatch.setattr(pipeline, "DRAW_WORKERS", 2)
+    live, peak, lock = [0], [0], threading.Lock()
+    def slow_draw(image, ann, out, fps=30):
+        with lock:
+            live[0] += 1; peak[0] = max(peak[0], live[0])
+        _t.sleep(0.3)
+        with lock:
+            live[0] -= 1
+        out.write_bytes(b"mp4"); return out
+    p = store.create_project("t", Settings(), "x")
+    d = deps(); d.draw = slow_draw
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
+    assert store.load(p.id).stage == "done"
+    assert peak[0] == 2

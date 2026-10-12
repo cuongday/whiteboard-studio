@@ -5,7 +5,7 @@ export default function RenderView({ project, busy, version, onRefresh, onEdit }
   { project: Project; busy: boolean; version: number; onRefresh: () => void; onEdit: (m: "scenes" | "images") => void }) {
   return (
     <div>
-      <h2>Bước 3 · {project.stage === "done" ? "Hoàn tất" : "Đang render"}</h2>
+      <h2>{project.stage === "done" ? "Hoàn tất" : "Đang render"}</h2>
       <table className="status">
         <thead><tr><th>Cảnh</th><th>Giọng</th><th>Vẽ</th><th>Thời lượng</th><th>Lỗi</th></tr></thead>
         <tbody>{project.scenes.map((s) => (
