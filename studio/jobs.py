@@ -7,6 +7,7 @@ class JobRunner:
         self._lock = threading.Lock()
         self._subs: list[queue.Queue] = []
         self.busy = False
+        self.pid: str | None = None
         self.deps_factory = deps_factory
 
     def subscribe(self) -> queue.Queue:
@@ -22,10 +23,11 @@ class JobRunner:
         with self._lock:
             if self.busy: return False
             self.busy = True
+            self.pid = pid
         try:
             threading.Thread(target=self._run, args=(pid, kind, kw), daemon=True).start()
         except BaseException:
-            self.busy = False
+            self.busy = False; self.pid = None
             raise
         return True
 
@@ -44,7 +46,7 @@ class JobRunner:
                 pass
             ev = {"pid": pid, "type": "error", "msg": str(e), "pct": 0}
         finally:
-            self.busy = False
+            self.busy = False; self.pid = None
         self.emit(ev)
 
 JOBS = JobRunner()

@@ -9,7 +9,11 @@ export type JobEvent = { pid: string; type: "progress" | "done" | "error"; msg: 
 
 async function j<T>(r: Promise<Response>): Promise<T> {
   const res = await r;
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? res.statusText);
+  if (!res.ok) {
+    const d = (await res.json().catch(() => ({}))).detail;
+    const msg = Array.isArray(d) ? d.map((x: { msg?: string }) => x?.msg ?? JSON.stringify(x)).join("; ") : d;
+    throw new Error(msg || res.statusText);
+  }
   return res.json();
 }
 export const api = {
@@ -22,10 +26,13 @@ export const api = {
   approveScenes: (id: string) => j(fetch(`/api/projects/${id}/approve/scenes`, { method: "POST" })),
   regenerate: (id: string, sid: string, image_prompt?: string) => j(fetch(`/api/projects/${id}/scenes/${sid}/regenerate`,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_prompt }) })),
+  segment: (id: string) => j(fetch(`/api/projects/${id}/segment`, { method: "POST" })),
+  jobs: () => j<{ busy: boolean; pid: string | null }>(fetch("/api/jobs")),
   render: (id: string) => j(fetch(`/api/projects/${id}/render`, { method: "POST" })),
   file: (id: string, path: string, bust = "") => `/api/projects/${id}/files/${path}${bust ? `?v=${bust}` : ""}`,
-  events: (id: string, on: (e: JobEvent) => void) => {
+  events: (id: string, on: (e: JobEvent) => void, onOpen?: () => void) => {
     const es = new EventSource(`/api/projects/${id}/events`);
+    es.onopen = () => onOpen?.();
     es.onmessage = (m) => on(JSON.parse(m.data));
     return () => es.close();
   },

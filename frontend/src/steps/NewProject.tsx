@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { api, Project } from "../api";
+import { stageLabel } from "../labels";
 
-export default function NewProject({ list, onOpen }: { list: Project[]; onOpen: (p: Project) => void }) {
+export default function NewProject({ list, onOpen, onCreated }: { list: Project[]; onOpen: (id: string) => void; onCreated: (p: Project) => void }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -10,7 +11,7 @@ export default function NewProject({ list, onOpen }: { list: Project[]; onOpen: 
     fd.set("captions", String(fd.get("captions") === "on"));
     fd.set("music", String(fd.get("music") === "on"));
     for (const k of ["file", "music_file"]) { const f = fd.get(k) as File | null; if (f && !f.name) fd.delete(k); }
-    try { onOpen(await api.create(fd)); } catch (x) { setErr(String((x as Error).message)); } finally { setBusy(false); }
+    try { onCreated(await api.create(fd)); } catch (x) { setErr(String((x as Error).message)); } finally { setBusy(false); }
   }
   return (
     <div className="grid2">
@@ -35,8 +36,8 @@ export default function NewProject({ list, onOpen }: { list: Project[]; onOpen: 
         <h2>Dự án gần đây</h2>
         {list.length === 0 && <p className="muted">Chưa có dự án.</p>}
         {list.map((p) => (
-          <div key={p.id} className="listItem" onClick={() => onOpen(p)}>
-            <b>{p.title}</b> <span className="muted">{p.settings.aspect} · {p.stage} · {p.scenes.length} cảnh</span>
+          <div key={p.id} className="listItem" onClick={() => onOpen(p.id)}>
+            <b>{p.title}</b> <span className="muted">{p.settings.aspect} · {stageLabel(p.stage)} · {p.scenes.length} cảnh</span>
           </div>
         ))}
       </div>

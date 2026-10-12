@@ -67,6 +67,11 @@ def _submit(pid, kind, **kw):
 def health():
     return {"checks": run_checks()}
 
+@app.get("/api/jobs")
+def jobs_state():
+    busy = JOBS.busy
+    return {"busy": busy, "pid": JOBS.pid if busy else None}
+
 @app.get("/api/projects")
 def projects():
     return [p.model_dump() for p in store.list_projects()]
@@ -168,6 +173,15 @@ def approve_scenes(pid: str):
     if p.stage not in ("scenes", "images"):
         raise HTTPException(409, "Không thể thực hiện ở bước này")
     _submit(pid, "images"); return {"ok": True}
+
+@app.post("/api/projects/{pid}/segment")
+def resegment(pid: str):
+    p = _get(pid)
+    if p.stage not in ("input", "scenes"):
+        raise HTTPException(409, "Không thể thực hiện ở bước này")
+    _busy_check()
+    p.job_error = None; store.save(p)
+    _submit(pid, "segment"); return {"ok": True}
 
 class Regen(BaseModel):
     image_prompt: str | None = None
