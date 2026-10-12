@@ -1,3 +1,4 @@
+import os
 import queue
 import threading
 import time
@@ -11,6 +12,7 @@ class JobRunner:
         self.pid: str | None = None
         self.kind: str | None = None
         self.started_at: float | None = None
+        self.last_progress: dict | None = None
         self.deps_factory = deps_factory
 
     def subscribe(self) -> queue.Queue:
@@ -29,6 +31,7 @@ class JobRunner:
             self.pid = pid
             self.kind = kind
             self.started_at = time.time()
+            self.last_progress = None
         try:
             threading.Thread(target=self._run, args=(pid, kind, kw), daemon=True).start()
         except BaseException:
@@ -38,9 +41,18 @@ class JobRunner:
 
     def _run(self, pid, kind, kw):
         ev: dict
+        lock = store.project_dir(pid) / ".job.pid"
+        try:
+            lock.write_text(str(os.getpid()))
+        except OSError:
+            pass
         try:
             deps = self.deps_factory()
-            deps.progress = lambda msg, pct: self.emit({"pid": pid, "type": "progress", "msg": msg, "pct": round(pct, 3)})
+            def progress(msg, pct):
+                ev = {"pid": pid, "type": "progress", "msg": msg, "pct": round(pct, 3)}
+                self.last_progress = ev
+                self.emit(ev)
+            deps.progress = progress
             fn = {"segment": pipeline.run_segment, "images": pipeline.run_images, "render": pipeline.run_render}[kind]
             fn(pid, deps, **kw)
             ev = {"pid": pid, "type": "done", "msg": kind, "pct": 1}
@@ -51,8 +63,9 @@ class JobRunner:
                 pass
             ev = {"pid": pid, "type": "error", "msg": str(e), "pct": 0}
         finally:
+            lock.unlink(missing_ok=True)
             self._record_time(pid, kind)
-            self.busy = False; self.pid = None; self.kind = None; self.started_at = None
+            self.busy = False; self.pid = None; self.kind = None; self.started_at = None; self.last_progress = None
         ev["seconds"] = self.last_seconds
         self.emit(ev)
 
@@ -66,3 +79,18 @@ class JobRunner:
             pass
 
 JOBS = JobRunner()
+
+
+def job_alive_elsewhere(pdir) -> bool:
+    """True if another live server process is running a job on this project dir."""
+    try:
+        other = int((pdir / ".job.pid").read_text())
+    except (OSError, ValueError):
+        return False
+    if other == os.getpid():
+        return False
+    try:
+        os.kill(other, 0)
+        return True
+    except OSError:
+        return False

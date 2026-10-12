@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from . import config, store
 from .checks import run_checks
 from .ingest import extract_text
-from .jobs import JOBS
+from .jobs import JOBS, job_alive_elsewhere
 from .llm import build_image_prompt
 from .models import STEPS, Scene, Settings
 from .pipeline import invalidate
@@ -23,7 +23,7 @@ def reset_stale() -> None:
         return
     for d in config.PROJECTS_DIR.iterdir():
         try:
-            if not (d / "project.json").exists():
+            if not (d / "project.json").exists() or job_alive_elsewhere(d):
                 continue
             p = store.load(d.name)
             changed = False
@@ -76,7 +76,8 @@ def health():
 def jobs_state():
     busy = JOBS.busy
     return {"busy": busy, "pid": JOBS.pid if busy else None, "kind": JOBS.kind if busy else None,
-            "started_at": JOBS.started_at if busy else None}
+            "started_at": JOBS.started_at if busy else None,
+            "progress": JOBS.last_progress if busy else None}
 
 @app.get("/api/projects")
 def projects():

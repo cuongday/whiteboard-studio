@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, JobEvent, JobState, Project } from "./api";
 import Timer from "./Timer";
 import Stepper from "./Stepper";
+import { pickProgress } from "./progress";
 import { stageLabel } from "./labels";
 import NewProject from "./steps/NewProject";
 import ScenesReview from "./steps/ScenesReview";
@@ -26,8 +27,11 @@ export default function App() {
   const idRef = useRef<string | null>(null);
   const wasBusy = useRef(false);
   const inputPending = useRef(false);
+  const remoteActive = useRef(false);
   idRef.current = project?.id ?? idRef.current;
   inputPending.current = !!project && project.stage === "input" && !project.job_error;
+  // job may be running in another server process sharing projects/: keep refreshing from disk
+  remoteActive.current = !!project && (project.stage === "rendering" || project.scenes.some((s) => Object.values(s.status).includes("running")));
 
   useEffect(() => { api.list().then(setList).catch(() => {}); api.health().then((h) => setChecks(h.checks)).catch(() => {}); }, []);
 
@@ -70,7 +74,7 @@ export default function App() {
       if (!alive) return;
       setJob(b ? js : null);
       setBusy(b);
-      if (b || wasBusy.current || inputPending.current) await reload();
+      if (b || wasBusy.current || inputPending.current || remoteActive.current) await reload();
       if (wasBusy.current && !b) setTick((x) => x + 1);
       wasBusy.current = b;
     };
@@ -88,6 +92,8 @@ export default function App() {
   };
 
   const bad = checks.filter((c) => !c.ok);
+  const running = busy || project?.stage === "rendering" || project?.scenes.some((s) => s.status.image === "running");
+  const prog = project && running ? pickProgress(ev, job?.progress ?? null, project) : null;
   const showScenes = project && (stage === "scenes" || edit === "scenes");
   const showImages = project && !showScenes && (stage === "images" || edit === "images");
   const showRender = project && !showScenes && !showImages && (stage === "rendering" || stage === "done");
@@ -109,7 +115,9 @@ export default function App() {
         <Timer startedAt={job?.started_at ?? null} kind={job?.kind ?? null} timings={project.timings} />
       </div>}
       {bad.length > 0 && <div className="warn">{bad.map((c) => <div key={c.name}>⚠ {c.name}: {c.hint}</div>)}</div>}
-      {ev && ev.type === "progress" && <div className="progress" role="progressbar" aria-valuenow={Math.round(ev.pct * 100)} aria-valuemin={0} aria-valuemax={100}><div style={{ width: `${ev.pct * 100}%` }} /><span>{ev.msg}</span><b>{Math.round(ev.pct * 100)}%</b></div>}
+      {prog && <div className="progress" role="progressbar" aria-valuenow={Math.round(prog.pct * 100)} aria-valuemin={0} aria-valuemax={100}>
+        <div style={{ width: `${Math.min(100, prog.pct * 100)}%` }} /><span>{prog.msg}</span><b>{Math.round(prog.pct * 100)}%</b>
+      </div>}
       {ev && ev.type === "error" && <div className="error">Lỗi: {ev.msg}</div>}
       {err && <div className="error">{err}</div>}
       {!project && <NewProject list={list} onCreated={open} onOpen={openById} />}

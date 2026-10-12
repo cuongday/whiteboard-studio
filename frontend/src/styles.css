@@ -170,17 +170,17 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .warn { background: #FFF8E1; border: 1px solid #FFE3A3; color: #6B4E00; padding: 10px 14px; border-radius: var(--radius); margin: 0 0 14px; font-size: 14px; }
 
 /* ---------- progress ---------- */
-.progress {
-  position: relative; height: 34px; margin: 0 0 16px; border-radius: 999px; overflow: hidden;
-  background: var(--blue-soft); display: flex; align-items: center;
+.progress { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; margin: 0 0 16px; }
+.progress span { grid-column: 1; grid-row: 1; font-size: 13.5px; font-weight: 500; color: var(--ink); }
+.progress b { grid-column: 2; grid-row: 1; font-family: var(--font-head); font-variant-numeric: tabular-nums; color: var(--blue-deep); }
+.progress::after {
+  content: ""; grid-column: 1 / -1; grid-row: 2; height: 12px; border-radius: 999px; background: var(--blue-soft);
 }
 .progress div {
-  position: absolute; inset: 0 auto 0 0; transition: width .5s ease;
+  grid-column: 1 / -1; grid-row: 2; z-index: 1; height: 12px; border-radius: 999px; min-width: 12px;
   background: linear-gradient(90deg, var(--blue), var(--violet) 70%, var(--coral));
+  transition: width .5s ease;
 }
-.progress span, .progress b { position: relative; font-size: 13.5px; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
-.progress span { padding-left: 16px; flex: 1; }
-.progress b { padding-right: 16px; font-variant-numeric: tabular-nums; color: var(--ink); text-shadow: none; }
 
 /* ---------- image review ---------- */
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }

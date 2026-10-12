@@ -128,9 +128,11 @@ def test_regenerate_busy_no_mutation(monkeypatch):
 def test_jobs_endpoint_and_resegment(monkeypatch):
     c, r = client(monkeypatch)
     pid = _mk(c, r)
-    assert c.get("/api/jobs").json() == {"busy": False, "pid": None, "kind": None, "started_at": None}
+    assert c.get("/api/jobs").json() == {"busy": False, "pid": None, "kind": None, "started_at": None, "progress": None}
     r.busy = True; r.pid = pid; r.kind = "render"; r.started_at = 100.0
-    assert c.get("/api/jobs").json() == {"busy": True, "pid": pid, "kind": "render", "started_at": 100.0}
+    r.last_progress = {"pid": pid, "type": "progress", "msg": "Vẽ", "pct": 0.5}
+    assert c.get("/api/jobs").json() == {"busy": True, "pid": pid, "kind": "render", "started_at": 100.0,
+                                         "progress": {"pid": pid, "type": "progress", "msg": "Vẽ", "pct": 0.5}}
     assert c.post(f"/api/projects/{pid}/segment").status_code == 409
     r.busy = False; r.pid = None; r.kind = None; r.started_at = None
     assert c.post(f"/api/projects/{pid}/segment").status_code == 200; wait(r)
@@ -164,3 +166,20 @@ def test_music_upload_bad_suffix(monkeypatch):
     res = c.post("/api/projects", data={"title": "T", "text": "abc"},
                  files={"music_file": ("x.exe", b"MZ", "application/octet-stream")})
     assert res.status_code == 400
+
+def test_reset_stale_skips_project_running_elsewhere(monkeypatch):
+    import os, subprocess, sys
+    from studio.models import Settings, Scene
+    p = store.create_project("t", Settings(), "x")
+    p.scenes = [Scene(id="01", text="a", status={"image": "done", "voice": "running", "draw": "pending"})]
+    p.stage = "rendering"; store.save(p)
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        (store.project_dir(p.id) / ".job.pid").write_text(str(other.pid))
+        app_mod.reset_stale()
+        q = store.load(p.id)
+        assert q.stage == "rendering" and q.scenes[0].status["voice"] == "running"
+    finally:
+        other.kill(); other.wait()
+    app_mod.reset_stale()   # owner gone -> stale state is reset
+    assert store.load(p.id).stage == "images"

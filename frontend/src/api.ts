@@ -5,7 +5,7 @@ export type Scene = { id: string; text: string; key_idea: string; visual_descrip
 export type Settings = { aspect: "16:9" | "9:16"; voice: string; captions: boolean; music: boolean; music_file: string | null };
 export type Project = { id: string; title: string; created_at: string; settings: Settings; source_text: string;
   stage: "input" | "scenes" | "images" | "rendering" | "done"; scenes: Scene[]; final: string | null; job_error: string | null; timings?: Record<string, number> };
-export type JobState = { busy: boolean; pid: string | null; kind: string | null; started_at: number | null };
+export type JobState = { busy: boolean; pid: string | null; kind: string | null; started_at: number | null; progress: JobEvent | null };
 export type JobEvent = { pid: string; type: "progress" | "done" | "error"; msg: string; pct: number };
 
 async function j<T>(r: Promise<Response>): Promise<T> {
