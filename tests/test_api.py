@@ -137,3 +137,29 @@ def test_jobs_endpoint_and_resegment(monkeypatch):
     assert store.load(pid).stage == "scenes"
     c.post(f"/api/projects/{pid}/approve/scenes"); wait(r)
     assert c.post(f"/api/projects/{pid}/segment").status_code == 409
+
+def test_settings_voice_change_invalidates_done_project(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _mk(c, r)
+    c.post(f"/api/projects/{pid}/approve/scenes"); wait(r)
+    c.post(f"/api/projects/{pid}/render"); wait(r)
+    p = c.get(f"/api/projects/{pid}").json()
+    assert p["stage"] == "done"
+    st = dict(p["settings"]); st["voice"] = "Giọng Khác"
+    out = c.put(f"/api/projects/{pid}/settings", json=st).json()
+    assert out["stage"] == "images" and out["final"] is None
+    assert all(s["status"]["voice"] == "pending" for s in out["scenes"])
+
+def test_settings_ignores_client_music_file(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _mk(c, r)
+    st = dict(c.get(f"/api/projects/{pid}").json()["settings"]); before = st["music_file"]
+    st["music_file"] = "../../etc/passwd"
+    out = c.put(f"/api/projects/{pid}/settings", json=st).json()
+    assert out["settings"]["music_file"] == before
+
+def test_music_upload_bad_suffix(monkeypatch):
+    c, r = client(monkeypatch)
+    res = c.post("/api/projects", data={"title": "T", "text": "abc"},
+                 files={"music_file": ("x.exe", b"MZ", "application/octet-stream")})
+    assert res.status_code == 400

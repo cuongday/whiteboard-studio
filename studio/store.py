@@ -33,5 +33,12 @@ def create_project(title: str, settings: Settings, source_text: str) -> Project:
 def list_projects() -> list[Project]:
     if not config.PROJECTS_DIR.exists():
         return []
-    out = [load(d.name) for d in config.PROJECTS_DIR.iterdir() if (d / "project.json").exists()]
+    out = []
+    for d in config.PROJECTS_DIR.iterdir():
+        if not (d / "project.json").exists():
+            continue
+        try:
+            out.append(load(d.name))
+        except Exception:  # noqa: BLE001
+            continue
     return sorted(out, key=lambda p: p.created_at, reverse=True)

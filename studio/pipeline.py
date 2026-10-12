@@ -56,6 +56,8 @@ def _step(p, scene, step, fn, deps, i, n, label):
 def run_images(pid: str, deps: Deps, only: list[str] | None = None) -> None:
     p = store.load(pid)
     todo = [s for s in p.scenes if (only is not None and s.id in only) or (only is None and s.status["image"] != "done")]
+    if only is not None:
+        p.final = None
     for i, s in enumerate(todo):
         if only is not None:
             invalidate(s, "image")

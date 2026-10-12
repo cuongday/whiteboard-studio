@@ -96,7 +96,11 @@ async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form
     p = store.create_project(title, Settings(aspect=aspect, voice=voice, captions=captions, music=music), source)
     if music_file and music_file.filename:
         up = store.project_dir(p.id) / "uploads"; up.mkdir(parents=True, exist_ok=True)
-        name = "music" + Path(music_file.filename).suffix.lower()
+        ext = Path(music_file.filename).suffix.lower()
+        if ext not in {".mp3", ".wav", ".m4a", ".ogg", ".aac", ".flac"}:
+            shutil.rmtree(store.project_dir(p.id), ignore_errors=True)
+            raise HTTPException(400, "Định dạng nhạc không hỗ trợ")
+        name = "music" + ext
         (up / name).write_bytes(await music_file.read())
         p.settings.music_file = f"uploads/{name}"; store.save(p)
     _submit(p.id, "segment")
@@ -157,13 +161,18 @@ def _move_scene_dirs(pid, old_ids, moves):
 def update_settings(pid: str, settings: Settings):
     _busy_check()
     p = _get(pid)
+    invalidated = False
     if settings.voice != p.settings.voice:
-        for s in p.scenes:
-            if s.status["voice"] == "done": invalidate(s, "voice")
+        for s_ in p.scenes:
+            if s_.status["voice"] == "done": invalidate(s_, "voice"); invalidated = True
     if settings.aspect != p.settings.aspect:
-        for s in p.scenes: invalidate(s, "image")
+        for s_ in p.scenes: invalidate(s_, "image")
+        invalidated = True
+    if invalidated:
         p.final = None
-    settings.music_file = settings.music_file or p.settings.music_file
+        if p.stage == "done":
+            p.stage = "images"
+    settings.music_file = p.settings.music_file
     p.settings = settings; store.save(p)
     return p.model_dump()
 
