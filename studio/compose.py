@@ -4,17 +4,20 @@ import math
 import re
 import subprocess
 from pathlib import Path
-from . import config, store
+from . import config, store, versions
 from .models import Project
 
-def build_props(p: Project) -> dict:
+def build_props(p: Project, vid: str) -> dict:
     w, h = config.ASPECTS[p.settings.aspect]
+    v = versions.get(p, vid)
     scenes = []
     for s in p.scenes:
-        d = store.scene_dir(p.id, s.id)
+        vs = v.scenes[s.id]
+        d = versions.vscene_dir(p.id, vid, s.id)
         words = json.loads((d / "words.json").read_text(encoding="utf-8")) if (d / "words.json").exists() else []
-        scenes.append({"clip": f"scenes/{s.id}/clip.mp4", "audio": f"scenes/{s.id}/voice.wav",
-                       "durationInFrames": math.ceil(s.duration_ms * config.FPS / 1000), "words": words})
+        base = f"versions/{vid}/scenes/{s.id}"
+        scenes.append({"clip": f"{base}/clip.mp4", "audio": f"{base}/voice.wav",
+                       "durationInFrames": math.ceil((vs.duration_ms or 0) * config.FPS / 1000), "words": words})
     music = p.settings.music_file if p.settings.music and p.settings.music_file else None
     return {"fps": config.FPS, "width": w, "height": h, "captions": p.settings.captions,
             "music": music, "scenes": scenes}
@@ -28,11 +31,13 @@ RENDER_CONCURRENCY = os.environ.get("STUDIO_RENDER_CONCURRENCY", "50%")
 # frame cache of the OffthreadVideo server; Remotion's default is half the free RAM
 OFFTHREAD_CACHE_BYTES = int(os.environ.get("STUDIO_OFFTHREAD_CACHE_MB", "1024")) * 1024 * 1024
 
-def render_final(p: Project, on_progress=None) -> Path:
+def render_final(p: Project, vid: str, on_progress=None) -> Path:
     pdir = store.project_dir(p.id)
-    props_file = pdir / "props.json"
-    props_file.write_text(json.dumps(build_props(p), ensure_ascii=False), encoding="utf-8")
-    out = pdir / "final.mp4"
+    vd = versions.vdir(p.id, vid)
+    vd.mkdir(parents=True, exist_ok=True)
+    props_file = vd / "props.json"
+    props_file.write_text(json.dumps(build_props(p, vid), ensure_ascii=False), encoding="utf-8")
+    out = vd / "final.mp4"
     cmd = ["npx", "remotion", "render", "src/index.ts", "FinalVideo", str(out),
            f"--props={props_file}", f"--public-dir={pdir}", f"--concurrency={RENDER_CONCURRENCY}",
            f"--offthreadvideo-cache-size-in-bytes={OFFTHREAD_CACHE_BYTES}", "--timeout=60000"]
@@ -67,3 +72,12 @@ def _explain(log: str) -> str:
                 f"đã thử lại {RENDER_ATTEMPTS} lần). Thường do máy thiếu RAM hoặc card mạng thay đổi; "
                 "hãy bấm render lại.")
     return "Remotion lỗi:"
+
+def make_preview(clip: Path, wav: Path, out: Path) -> Path:
+    """Scene preview for the editor: whiteboard clip + narration, video stream copied (~1 s)."""
+    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(clip), "-i", str(wav),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+                        "-movflags", "+faststart", str(out)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("Lỗi tạo bản xem thử: " + r.stderr[-400:])
+    return out
