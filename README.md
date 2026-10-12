@@ -32,8 +32,8 @@ Biến tuỳ chọn khác:
 
 | Biến | Mặc định |
 |---|---|
-| `GEMINI_TEXT_MODEL` | `gemini-2.5-flash` |
-| `GEMINI_IMAGE_MODEL` | `gemini-2.5-flash-image` |
+| `GEMINI_TEXT_MODEL` | `gemini-2.5-flash` (model chia cảnh mặc định; chọn được trong giao diện) |
+| `GEMINI_IMAGE_MODEL` | `gemini-2.5-flash-image` (model tạo ảnh mặc định; chọn được trong giao diện) |
 | `VIENEU_MODE` | `v3turbo` |
 | `STUDIO_PROJECTS_DIR` | thư mục `projects/` ở gốc repo |
 

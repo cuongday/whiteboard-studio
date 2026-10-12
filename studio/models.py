@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Literal
 from pydantic import BaseModel, Field
+from . import config
 
 StepState = Literal["pending", "running", "done", "error"]
 STEPS = ("image", "voice", "draw")
@@ -19,6 +20,7 @@ class Scene(BaseModel):
     status: dict[str, StepState] = Field(default_factory=lambda: {s: "pending" for s in STEPS})
     error: str | None = None
     duration_ms: int | None = None
+    image_model: str | None = None   # model that drew the current image.png
 
 class Settings(BaseModel):
     aspect: Literal["16:9", "9:16"] = "16:9"
@@ -26,6 +28,8 @@ class Settings(BaseModel):
     captions: bool = True
     music: bool = False
     music_file: str | None = None
+    text_model: str = Field(default_factory=lambda: config.TEXT_MODEL)
+    image_model: str = Field(default_factory=lambda: config.IMAGE_MODEL)
 
 class Project(BaseModel):
     id: str

@@ -183,3 +183,22 @@ def test_reset_stale_skips_project_running_elsewhere(monkeypatch):
         other.kill(); other.wait()
     app_mod.reset_stale()   # owner gone -> stale state is reset
     assert store.load(p.id).stage == "images"
+
+def test_models_endpoint_and_validation(monkeypatch):
+    c, r = client(monkeypatch)
+    m = c.get("/api/models").json()
+    assert {"gemini-2.5-flash", "gemini-3.8-flash"} <= {x["id"] for x in m["text"]}
+    assert "gemini-3-pro-image" in {x["id"] for x in m["image"]}
+    res = c.post("/api/projects", data={"title": "T", "text": "abc", "text_model": "gpt-4"})
+    assert res.status_code == 400
+    res = c.post("/api/projects", data={"title": "T", "text": "abc", "text_model": "gemini-3.8-flash",
+                                        "image_model": "gemini-3-pro-image"})
+    pid = res.json()["id"]; wait(r)
+    p = c.get(f"/api/projects/{pid}").json()
+    assert (p["settings"]["text_model"], p["settings"]["image_model"]) == ("gemini-3.8-flash", "gemini-3-pro-image")
+    assert c.post(f"/api/projects/{pid}/approve/scenes").status_code == 200; wait(r)
+    assert c.post(f"/api/projects/{pid}/scenes/01/regenerate", json={"image_model": "nope"}).status_code == 400
+    assert c.post(f"/api/projects/{pid}/scenes/01/regenerate",
+                  json={"image_model": "gemini-3.1-flash-lite-image"}).status_code == 200; wait(r)
+    sc = c.get(f"/api/projects/{pid}").json()["scenes"]
+    assert sc[0]["image_model"] == "gemini-3.1-flash-lite-image"

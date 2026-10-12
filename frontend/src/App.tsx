@@ -3,6 +3,7 @@ import { api, JobEvent, JobState, Project } from "./api";
 import Timer from "./Timer";
 import Stepper from "./Stepper";
 import { pickProgress } from "./progress";
+import { ModelSelect, useModels } from "./models";
 import { stageLabel } from "./labels";
 import NewProject from "./steps/NewProject";
 import ScenesReview from "./steps/ScenesReview";
@@ -86,9 +87,11 @@ export default function App() {
   const stage = project?.stage;
   useEffect(() => { if (stage === "done") setRenderCount((c) => c + 1); }, [stage, pid]);
 
+  const models = useModels();
+  const [retryModel, setRetryModel] = useState("");
   const retry = async () => {
     if (!project) return; beginAction();
-    try { await api.segment(project.id); afterAction(); } catch (e) { setErr(String((e as Error).message)); }
+    try { await api.segment(project.id, retryModel || undefined); afterAction(); } catch (e) { setErr(String((e as Error).message)); }
   };
 
   const bad = checks.filter((c) => !c.ok);
@@ -124,7 +127,9 @@ export default function App() {
       {project?.stage === "input" && (project.job_error
         ? <div className="card">
             <div className="error">Chia cảnh thất bại: {project.job_error}</div>
-            <div className="row"><button disabled={busy} onClick={retry}>Thử lại</button><button onClick={() => open(null)}>← Về danh sách</button></div>
+            {models && <ModelSelect label="Model chia cảnh" options={models.text}
+              value={retryModel || project.settings.text_model} onChange={setRetryModel} />}
+            <div className="row"><button className="primary" disabled={busy} onClick={retry}>Thử lại</button><button onClick={() => open(null)}>← Về danh sách</button></div>
           </div>
         : <div className="card waiting"><span className="spinner" aria-hidden="true" />Gemini đang đọc kịch bản và chia cảnh…</div>)}
       {showScenes && <ScenesReview key={`${project.id}:${session}`} project={project} busy={busy}

@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { api, Project } from "../api";
 import { stageLabel } from "../labels";
+import { ModelSelect, useModels } from "../models";
 
 export default function NewProject({ list, onOpen, onCreated }: { list: Project[]; onOpen: (id: string) => void; onCreated: (p: Project) => void }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const models = useModels();
+  const [textModel, setTextModel] = useState("");
+  const [imageModel, setImageModel] = useState("");
   const [voices, setVoices] = useState<{ id: string; label: string }[]>([{ id: "Hải Đăng", label: "Hải Đăng" }]);
   useEffect(() => { api.voices().then((v) => v.length && setVoices(v)).catch(() => {}); }, []);
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -30,6 +34,12 @@ export default function NewProject({ list, onOpen, onCreated }: { list: Project[
             </select>
           </label>
         </div>
+        {models && <div className="row">
+          <ModelSelect name="text_model" label="Model chia cảnh (text)" options={models.text}
+            value={textModel || models.default_text} onChange={setTextModel} />
+          <ModelSelect name="image_model" label="Model tạo ảnh" options={models.image}
+            value={imageModel || models.default_image} onChange={setImageModel} />
+        </div>}
         <div className="row">
           <label className="check"><input type="checkbox" name="captions" defaultChecked /> Phụ đề karaoke</label>
           <label className="check"><input type="checkbox" name="music" /> Nhạc nền</label>

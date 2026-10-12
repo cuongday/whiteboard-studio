@@ -4,11 +4,14 @@ import numpy as np
 from studio import pipeline, store
 from studio.models import Settings, Scene, Element
 
-def fake_segment(text, aspect):
+used_models = []
+
+def fake_segment(text, aspect, model=None):
     return [Scene(id="01", text="Giá tăng.", visual_description="x", elements=[Element(label="a", say="tăng")], image_prompt="p1"),
             Scene(id="02", text="Tiền giảm.", visual_description="y", elements=[Element(label="b", say="giảm")], image_prompt="p2")]
 
-def fake_image(prompt, aspect, out):
+def fake_image(prompt, aspect, out, model=None):
+    used_models.append(model)
     cv2.imwrite(str(out), np.full((100, 200, 3), 230, np.uint8)); return out
 
 def fake_synth(text, voice, out_wav):
@@ -51,9 +54,9 @@ def test_scene_error_isolated():
     p = store.create_project("t", Settings(), "x")
     d = deps()
     pipeline.run_segment(p.id, d)
-    def bad_image(prompt, aspect, out):
+    def bad_image(prompt, aspect, out, model=None):
         if prompt == "p2": raise RuntimeError("boom")
-        return fake_image(prompt, aspect, out)
+        return fake_image(prompt, aspect, out, model)
     d.gen_image = bad_image
     pipeline.run_images(p.id, d)
     q = store.load(p.id)
@@ -88,3 +91,19 @@ def test_render_draws_in_parallel(monkeypatch):
     pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
     assert store.load(p.id).stage == "done"
     assert peak[0] == 2
+
+def test_models_flow_through():
+    seen = {}
+    def seg(text, aspect, model=None):
+        seen["text"] = model; return fake_segment(text, aspect)
+    p = store.create_project("t", Settings(text_model="gemini-3.8-flash", image_model="gemini-3-pro-image"), "x")
+    d = deps(); d.segment = seg
+    used_models.clear()
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d)
+    assert seen["text"] == "gemini-3.8-flash"
+    assert used_models == ["gemini-3-pro-image", "gemini-3-pro-image"]
+    used_models.clear()
+    pipeline.run_images(p.id, d, only=["02"], model="gemini-3.1-flash-lite-image")
+    q = store.load(p.id)
+    assert used_models == ["gemini-3.1-flash-lite-image"]
+    assert (q.scenes[0].image_model, q.scenes[1].image_model) == ("gemini-3-pro-image", "gemini-3.1-flash-lite-image")

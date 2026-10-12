@@ -10,12 +10,12 @@ from tests.test_annotate import make_scene
 pytestmark = pytest.mark.skipif(not (config.COMPOSER_DIR / "node_modules").exists(), reason="composer not installed")
 
 
-def seg(text, aspect):
+def seg(text, aspect, model=None):
     return [Scene(id=f"{i:02d}", text=t, visual_description="v", elements=[Element(label="a", say=t.split()[0]),
             Element(label="b", say=t.split()[-1].strip("."))], image_prompt="p") for i, t in enumerate(["Giá cả tăng nhanh.", "Tiền mất giá."], 1)]
 
 
-def img(prompt, aspect, out):
+def img(prompt, aspect, out, model=None):
     make_scene(out)
     return out
 

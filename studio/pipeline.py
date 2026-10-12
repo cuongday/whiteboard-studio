@@ -45,7 +45,7 @@ def _fit(path, size):
 def run_segment(pid: str, deps: Deps) -> None:
     p = store.load(pid)
     deps.progress("Đang chia cảnh…", 0.1)
-    p.scenes = deps.segment(p.source_text, p.settings.aspect)
+    p.scenes = deps.segment(p.source_text, p.settings.aspect, model=p.settings.text_model)
     p.final = None
     p.stage = "scenes"
     store.save(p)
@@ -64,7 +64,7 @@ def _step(p, scene, step, fn, deps, i, n, label):
         store.save(p)
     return ok
 
-def run_images(pid: str, deps: Deps, only: list[str] | None = None) -> None:
+def run_images(pid: str, deps: Deps, only: list[str] | None = None, model: str | None = None) -> None:
     p = store.load(pid)
     todo = [s for s in p.scenes if (only is not None and s.id in only) or (only is None and s.status["image"] != "done")]
     if only is not None:
@@ -72,7 +72,9 @@ def run_images(pid: str, deps: Deps, only: list[str] | None = None) -> None:
     def one(i, s):
         out = store.scene_dir(pid, s.id) / "image.png"
         def work():
-            deps.gen_image(s.image_prompt, p.settings.aspect, out)
+            used = model or p.settings.image_model
+            deps.gen_image(s.image_prompt, p.settings.aspect, out, model=used)
+            s.image_model = used
             _fit(out, config.ASPECTS[p.settings.aspect])
         _step(p, s, "image", work, deps, i, len(todo), "Vẽ ảnh")
     if only is not None:

@@ -63,6 +63,16 @@ def _submit(pid, kind, **kw):
     if not JOBS.submit(pid, kind, **kw):
         raise HTTPException(409, "Đang có tác vụ khác chạy")
 
+@app.get("/api/models")
+def models():
+    pack = lambda ms: [{"id": m, "label": label} for m, label in ms]  # noqa: E731
+    return {"text": pack(config.TEXT_MODELS), "image": pack(config.IMAGE_MODELS),
+            "default_text": config.TEXT_MODEL, "default_image": config.IMAGE_MODEL}
+
+def _check_model(model: str | None, allowed) -> None:
+    if model and model not in {m for m, _ in allowed}:
+        raise HTTPException(400, f"Model không hỗ trợ: {model}")
+
 @app.get("/api/voices")
 async def voices():
     from .voice import list_voices
@@ -90,8 +100,10 @@ def project(pid: str):
 @app.post("/api/projects")
 async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form("16:9"),
                  voice: str = Form("Hải Đăng"), captions: bool = Form(True), music: bool = Form(False),
+                 text_model: str = Form(""), image_model: str = Form(""),
                  file: UploadFile | None = File(None), music_file: UploadFile | None = File(None)):
     _busy_check()
+    _check_model(text_model, config.TEXT_MODELS); _check_model(image_model, config.IMAGE_MODELS)
     try:
         source = extract_text(file.filename, await file.read()) if file and file.filename else text.strip()
     except ValueError as e:
@@ -100,7 +112,9 @@ async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form
         raise HTTPException(400, f"Không đọc được file: {e}")
     if not source:
         raise HTTPException(400, "Cần nhập kịch bản hoặc tải file")
-    p = store.create_project(title, Settings(aspect=aspect, voice=voice, captions=captions, music=music), source)
+    p = store.create_project(title, Settings(aspect=aspect, voice=voice, captions=captions, music=music,
+                                             text_model=text_model or config.TEXT_MODEL,
+                                             image_model=image_model or config.IMAGE_MODEL), source)
     if music_file and music_file.filename:
         up = store.project_dir(p.id) / "uploads"; up.mkdir(parents=True, exist_ok=True)
         ext = Path(music_file.filename).suffix.lower()
@@ -168,6 +182,7 @@ def _move_scene_dirs(pid, old_ids, moves):
 def update_settings(pid: str, settings: Settings):
     _busy_check()
     p = _get(pid)
+    _check_model(settings.text_model, config.TEXT_MODELS); _check_model(settings.image_model, config.IMAGE_MODELS)
     invalidated = False
     if settings.voice != p.settings.voice:
         for s_ in p.scenes:
@@ -190,17 +205,23 @@ def approve_scenes(pid: str):
         raise HTTPException(409, "Không thể thực hiện ở bước này")
     _submit(pid, "images"); return {"ok": True}
 
+class Resegment(BaseModel):
+    text_model: str | None = None
+
 @app.post("/api/projects/{pid}/segment")
-def resegment(pid: str):
+def resegment(pid: str, body: Resegment | None = None):
     p = _get(pid)
     if p.stage not in ("input", "scenes"):
         raise HTTPException(409, "Không thể thực hiện ở bước này")
     _busy_check()
+    if body and body.text_model:
+        _check_model(body.text_model, config.TEXT_MODELS); p.settings.text_model = body.text_model
     p.job_error = None; store.save(p)
     _submit(pid, "segment"); return {"ok": True}
 
 class Regen(BaseModel):
     image_prompt: str | None = None
+    image_model: str | None = None
 
 @app.post("/api/projects/{pid}/scenes/{sid}/regenerate")
 def regenerate(pid: str, sid: str, body: Regen):
@@ -208,8 +229,9 @@ def regenerate(pid: str, sid: str, body: Regen):
     _busy_check()
     s = next((x for x in p.scenes if x.id == sid), None)
     if not s: raise HTTPException(404, "Không có cảnh")
+    _check_model(body.image_model, config.IMAGE_MODELS)
     if body.image_prompt: s.image_prompt = body.image_prompt
-    store.save(p); _submit(pid, "images", only=[sid]); return {"ok": True}
+    store.save(p); _submit(pid, "images", only=[sid], model=body.image_model); return {"ok": True}
 
 @app.post("/api/projects/{pid}/render")
 def render(pid: str):

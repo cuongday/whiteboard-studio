@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { api, Project } from "../api";
 import { stepLabel } from "../labels";
+import { ModelSelect, useModels } from "../models";
 
 type Props = { project: Project; busy: boolean; tick: number; beginAction: () => void; afterAction: () => void;
   onEditScenes: () => void; onRender: () => void };
 
 export default function ImagesReview({ project, busy, tick, beginAction, afterAction, onEditScenes, onRender }: Props) {
   const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  const models = useModels();
+  const modelLabel = (id?: string | null) => models?.image.find((m) => m.id === id)?.label.split(" — ")[0] ?? id;
   const [err, setErr] = useState("");
   const [regen, setRegen] = useState<Record<string, number>>({});
   const [doneAt, setDoneAt] = useState<Record<string, number>>({});
@@ -36,12 +40,19 @@ export default function ImagesReview({ project, busy, tick, beginAction, afterAc
             {s.status.image === "done"
               ? <img src={api.file(project.id, `scenes/${s.id}/image.png`, `${project.created_at}-${regen[s.id] ?? 0}-${doneAt[s.id] ?? 0}-${tick}`)} />
               : <div className="placeholder">{s.status.image === "running" ? "Đang vẽ…" : s.error ?? "Chưa có ảnh"}</div>}
+            {s.image_model && s.status.image === "done" && <span className="model-tag">Vẽ bằng {modelLabel(s.image_model)}</span>}
             <p className="small">{s.text}</p>
             <details><summary>Sửa prompt</summary>
               <textarea rows={5} value={prompts[s.id] ?? s.image_prompt} onChange={(e) => setPrompts({ ...prompts, [s.id]: e.target.value })} />
             </details>
-            <button disabled={busy} onClick={() => run(() => api.regenerate(project.id, s.id, prompts[s.id]),
-              () => setRegen((r) => ({ ...r, [s.id]: (r[s.id] ?? 0) + 1 })))}>Tạo lại ảnh</button>
+            <div className="regen">
+              {models && <ModelSelect label="Model tạo lại" options={models.image}
+                value={picked[s.id] ?? s.image_model ?? project.settings.image_model}
+                onChange={(v) => setPicked({ ...picked, [s.id]: v })} />}
+              <button disabled={busy} onClick={() => run(() => api.regenerate(project.id, s.id, prompts[s.id],
+                picked[s.id] ?? s.image_model ?? project.settings.image_model),
+                () => setRegen((r) => ({ ...r, [s.id]: (r[s.id] ?? 0) + 1 })))}>Tạo lại ảnh</button>
+            </div>
           </div>
         ))}
       </div>

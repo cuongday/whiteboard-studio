@@ -1,8 +1,9 @@
 export type Element = { label: string; say: string };
 export type StepState = "pending" | "running" | "done" | "error";
 export type Scene = { id: string; text: string; key_idea: string; visual_description: string; elements: Element[];
-  image_prompt: string; status: Record<"image" | "voice" | "draw", StepState>; error: string | null; duration_ms: number | null };
-export type Settings = { aspect: "16:9" | "9:16"; voice: string; captions: boolean; music: boolean; music_file: string | null };
+  image_prompt: string; status: Record<"image" | "voice" | "draw", StepState>; error: string | null; duration_ms: number | null; image_model?: string | null };
+export type Settings = { aspect: "16:9" | "9:16"; voice: string; captions: boolean; music: boolean; music_file: string | null;
+  text_model: string; image_model: string };
 export type Project = { id: string; title: string; created_at: string; settings: Settings; source_text: string;
   stage: "input" | "scenes" | "images" | "rendering" | "done"; scenes: Scene[]; final: string | null; job_error: string | null; timings?: Record<string, number> };
 export type JobState = { busy: boolean; pid: string | null; kind: string | null; started_at: number | null; progress: JobEvent | null };
@@ -26,9 +27,11 @@ export const api = {
   saveScenes: (id: string, scenes: Scene[]) => j<Project>(fetch(`/api/projects/${id}/scenes`,
     { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(scenes) })),
   approveScenes: (id: string) => j(fetch(`/api/projects/${id}/approve/scenes`, { method: "POST" })),
-  regenerate: (id: string, sid: string, image_prompt?: string) => j(fetch(`/api/projects/${id}/scenes/${sid}/regenerate`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_prompt }) })),
-  segment: (id: string) => j(fetch(`/api/projects/${id}/segment`, { method: "POST" })),
+  regenerate: (id: string, sid: string, image_prompt?: string, image_model?: string) => j(fetch(`/api/projects/${id}/scenes/${sid}/regenerate`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_prompt, image_model }) })),
+  segment: (id: string, text_model?: string) => j(fetch(`/api/projects/${id}/segment`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text_model }) })),
+  models: () => j<import("./models").ModelList>(fetch("/api/models")),
   jobs: () => j<JobState>(fetch("/api/jobs")),
   render: (id: string) => j(fetch(`/api/projects/${id}/render`, { method: "POST" })),
   file: (id: string, path: string, bust = "") => `/api/projects/${id}/files/${path}${bust ? `?v=${bust}` : ""}`,

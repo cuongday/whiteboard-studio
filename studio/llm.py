@@ -55,7 +55,7 @@ def build_image_prompt(scene: Scene) -> str:
     objs = ", ".join(e.label for e in scene.elements)
     return f"{STYLE}\nScene: {scene.visual_description}\nDistinct objects to draw: {objs}."
 
-def segment_script(text: str, aspect: str, client=None) -> list[Scene]:
+def segment_script(text: str, aspect: str, client=None, model: str | None = None) -> list[Scene]:
     client = client or get_client()
     lo, hi = config.SCENE_SECONDS[aspect]
     prompt = (
@@ -71,7 +71,7 @@ def segment_script(text: str, aspect: str, client=None) -> list[Scene]:
                                       temperature=0.3)
     last = None
     for _ in range(3):
-        resp = _call(client, model=config.TEXT_MODEL, contents=prompt, config=cfg)
+        resp = _call(client, model=model or config.TEXT_MODEL, contents=prompt, config=cfg)
         try:
             data = json.loads(resp.text)
             raw = data["scenes"]
@@ -89,11 +89,11 @@ def segment_script(text: str, aspect: str, client=None) -> list[Scene]:
             last = e
     raise LLMError(f"Gemini trả về dữ liệu chia cảnh không hợp lệ: {last}")
 
-def generate_image(prompt: str, aspect: str, out: Path, client=None) -> Path:
+def generate_image(prompt: str, aspect: str, out: Path, client=None, model: str | None = None) -> Path:
     client = client or get_client()
     cfg = types.GenerateContentConfig(response_modalities=["IMAGE"],
                                       image_config=types.ImageConfig(aspect_ratio=aspect))
-    resp = _call(client, model=config.IMAGE_MODEL, contents=prompt, config=cfg)
+    resp = _call(client, model=model or config.IMAGE_MODEL, contents=prompt, config=cfg)
     for cand in resp.candidates or []:
         for part in (cand.content.parts if cand.content else []) or []:
             if getattr(part, "inline_data", None) and part.inline_data.data:
