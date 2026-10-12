@@ -107,3 +107,22 @@ def test_models_flow_through():
     q = store.load(p.id)
     assert used_models == ["gemini-3.1-flash-lite-image"]
     assert (q.scenes[0].image_model, q.scenes[1].image_model) == ("gemini-3-pro-image", "gemini-3.1-flash-lite-image")
+
+def test_render_voices_in_parallel(monkeypatch):
+    import threading, time as _t
+    from studio import voice as voice_mod
+    monkeypatch.setattr(voice_mod, "VOICE_WORKERS", 2)
+    live, peak, lock = [0], [0], threading.Lock()
+    def slow_synth(text, v, out_wav):
+        with lock:
+            live[0] += 1; peak[0] = max(peak[0], live[0])
+        _t.sleep(0.3)
+        with lock:
+            live[0] -= 1
+        return fake_synth(text, v, out_wav)
+    p = store.create_project("t", Settings(), "x")
+    d = deps(); d.synth = slow_synth
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
+    q = store.load(p.id)
+    assert q.stage == "done" and all(s.status["draw"] == "done" for s in q.scenes)
+    assert peak[0] == 2

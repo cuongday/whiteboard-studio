@@ -35,6 +35,9 @@ Biến tuỳ chọn khác:
 | `GEMINI_TEXT_MODEL` | `gemini-2.5-flash` (model chia cảnh mặc định; chọn được trong giao diện) |
 | `GEMINI_IMAGE_MODEL` | `gemini-2.5-flash-image` (model tạo ảnh mặc định; chọn được trong giao diện) |
 | `VIENEU_MODE` | `v3turbo` |
+| `STUDIO_VOICE_WORKERS` | `4` (số bản VieNeu đọc song song, mỗi bản ~1,5 GB RAM) |
+| `STUDIO_DRAW_WORKERS` | 3/8 số nhân CPU, tối đa 8 (số cảnh vẽ song song) |
+| `STUDIO_IMAGE_WORKERS` | `4` (số ảnh Gemini tạo song song) |
 | `STUDIO_PROJECTS_DIR` | thư mục `projects/` ở gốc repo |
 
 ## Cài đặt và chạy

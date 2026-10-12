@@ -24,7 +24,8 @@ class Deps:
     progress: Callable[[str, float], None] = field(default=lambda msg, pct: None)
 
 IMAGE_WORKERS = int(os.environ.get("STUDIO_IMAGE_WORKERS", "4"))
-DRAW_WORKERS = int(os.environ.get("STUDIO_DRAW_WORKERS", str(max(1, min(4, (os.cpu_count() or 2) // 4)))))
+# whiteboard renders are single-threaded Python/OpenCV loops: ~1 core each
+DRAW_WORKERS = int(os.environ.get("STUDIO_DRAW_WORKERS", str(max(1, min(8, (os.cpu_count() or 2) * 3 // 8)))))
 _SAVE_LOCK = threading.Lock()   # steps run on worker threads but share one Project
 
 def invalidate(scene: Scene, from_step: str) -> None:
@@ -98,9 +99,22 @@ def run_render(pid: str, deps: Deps) -> None:
             deps.draw(d / "image.png", ann, d / "clip.mp4", fps=config.FPS)
         _step(p, s, "draw", dr, deps, i, n, "Vẽ animation")
 
-    # VieNeu runs one sentence at a time (model is not re-entrant), so voices stay
-    # sequential; each scene's whiteboard render starts on the pool as soon as its voice is ready.
-    with ThreadPoolExecutor(max_workers=max(1, DRAW_WORKERS)) as pool:
+    def voice_scene(i, s, d):
+        def v():
+            deps.synth(s.text, p.settings.voice, d / "voice.wav")
+            s.duration_ms = voice.wav_duration_ms(d / "voice.wav")
+        if not _step(p, s, "voice", v, deps, i, n, "Đọc"):
+            return
+        with _SAVE_LOCK:
+            s.status["draw"] = "pending"
+        draws.append(draw_pool.submit(draw_scene, i, s, d))
+
+    # Narration (several VieNeu instances) and whiteboard drawing run in two pools; each
+    # scene's drawing starts as soon as its own narration is ready.
+    draws: list = []
+    with ThreadPoolExecutor(max_workers=max(1, DRAW_WORKERS)) as draw_pool, \
+         ThreadPoolExecutor(max_workers=max(1, voice.VOICE_WORKERS)) as voice_pool:
+        voices = []
         for i, s in enumerate(p.scenes):
             d = store.scene_dir(pid, s.id)
             if s.status["image"] != "done":
@@ -108,14 +122,14 @@ def run_render(pid: str, deps: Deps) -> None:
                     s.status["voice"] = "error"; s.error = "Chưa có ảnh"; store.save(p)
                 continue
             if s.status["voice"] != "done":
-                def v(s=s, d=d):
-                    deps.synth(s.text, p.settings.voice, d / "voice.wav")
-                    s.duration_ms = voice.wav_duration_ms(d / "voice.wav")
-                if not _step(p, s, "voice", v, deps, i, n, "Đọc"):
-                    continue
-                s.status["draw"] = "pending"
-            if s.status["draw"] != "done":
-                pool.submit(draw_scene, i, s, d)
+                voices.append(voice_pool.submit(voice_scene, i, s, d))
+            elif s.status["draw"] != "done":
+                draws.append(draw_pool.submit(draw_scene, i, s, d))
+        for f in voices:
+            f.result()
+        voice_pool.shutdown(wait=True)
+        for f in list(draws):
+            f.result()
     if any(s.status["draw"] != "done" or s.status["voice"] != "done" for s in p.scenes):
         p.stage = "images"; p.job_error = "Một số cảnh lỗi, hãy xem và thử lại"; store.save(p)
         raise RuntimeError(p.job_error)

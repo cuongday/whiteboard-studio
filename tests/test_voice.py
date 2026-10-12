@@ -37,3 +37,20 @@ def test_list_voices_fallback(monkeypatch):
     class Broken:
         def list_preset_voices(self): raise RuntimeError("no model")
     assert voice.list_voices(Broken()) == [{"id": "Hải Đăng", "label": "Hải Đăng"}]
+
+def test_pool_reuses_instances_and_caps(monkeypatch):
+    import threading, time as _t
+    made = []
+    class Slow(FakeTTS):
+        def infer(self, text, voice=None):
+            _t.sleep(0.05); return super().infer(text, voice)
+    monkeypatch.setattr(voice, "VOICE_WORKERS", 2)
+    monkeypatch.setattr(voice, "_POOL", [])
+    monkeypatch.setattr(voice, "_CREATED", [0])
+    monkeypatch.setattr(voice, "_new_tts", lambda threads=0: made.append(threads) or Slow())
+    import tempfile, pathlib
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    ts = [threading.Thread(target=voice.synthesize, args=("Một hai.", "Hải Đăng", tmp / f"{i}" / "voice.wav")) for i in range(6)]
+    for t in ts: t.start()
+    for t in ts: t.join()
+    assert len(made) == 2 and len(voice._POOL) == 2

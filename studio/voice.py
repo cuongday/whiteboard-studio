@@ -8,7 +8,14 @@ import numpy as np
 import soundfile as sf
 
 LEAD_MS, GAP_MS, TAIL_MS = 300, 250, 600
-_LOCK = threading.Lock()
+# One VieNeu instance only runs one inference at a time on CPU, so parallel narration uses
+# several instances with fewer ONNX threads each (bench 2026-10-12, 16 cores: 1x8 threads
+# 15.9 s, 2x4 11.7 s, 4x2 8.4 s for 6 sentences). Each instance holds ~1.5 GB RAM.
+VOICE_WORKERS = int(os.environ.get("STUDIO_VOICE_WORKERS", "4"))
+_POOL_LOCK = threading.Lock()
+_POOL: list = []               # idle instances
+_CREATED = [0]
+_AVAILABLE = threading.Condition(_POOL_LOCK)
 _TTS = {}
 
 class Word(TypedDict):
@@ -16,14 +23,43 @@ class Word(TypedDict):
     start_ms: int
     end_ms: int
 
+def _new_tts(threads: int = 0):
+    try:
+        from vieneu import Vieneu
+    except ImportError as e:
+        raise RuntimeError("Chưa cài VieNeu: pip install vieneu") from e
+    return Vieneu(mode=os.environ.get("VIENEU_MODE", "v3turbo"), threads=threads)
+
 def get_tts():
+    """Shared instance for metadata (voice list); synthesis borrows from the pool."""
     if "t" not in _TTS:
-        try:
-            from vieneu import Vieneu
-        except ImportError as e:
-            raise RuntimeError("Chưa cài VieNeu: pip install vieneu") from e
-        _TTS["t"] = Vieneu(mode=os.environ.get("VIENEU_MODE", "v3turbo"))
+        _TTS["t"] = _new_tts()
     return _TTS["t"]
+
+def _threads_per_worker() -> int:
+    return max(1, (os.cpu_count() or 8) // max(1, VOICE_WORKERS))
+
+class _Borrow:
+    """Context manager lending one VieNeu instance exclusively (created lazily up to VOICE_WORKERS)."""
+    def __enter__(self):
+        with _AVAILABLE:
+            while not _POOL and _CREATED[0] >= max(1, VOICE_WORKERS):
+                _AVAILABLE.wait()
+            if _POOL:
+                self.tts = _POOL.pop()
+                return self.tts
+            _CREATED[0] += 1
+        try:
+            self.tts = _new_tts(_threads_per_worker())
+        except BaseException:
+            with _AVAILABLE:
+                _CREATED[0] -= 1; _AVAILABLE.notify()
+            raise
+        return self.tts
+
+    def __exit__(self, *exc):
+        with _AVAILABLE:
+            _POOL.append(self.tts); _AVAILABLE.notify()
 
 DEFAULT_VOICE = "Hải Đăng"
 _VOICES: list[dict] = []
@@ -47,17 +83,21 @@ def _silence(ms: int, rate: int) -> np.ndarray:
     return np.zeros(int(rate * ms / 1000), dtype=np.float32)
 
 def synthesize(text: str, voice_name: str, out_wav: Path, tts=None) -> list[Word]:
-    tts = tts or get_tts()
+    if tts is None:
+        with _Borrow() as borrowed:
+            return _synthesize(text, voice_name, out_wav, borrowed)
+    return _synthesize(text, voice_name, out_wav, tts)
+
+def _synthesize(text: str, voice_name: str, out_wav: Path, tts) -> list[Word]:
     rate = tts.sample_rate
     chunks = [_silence(LEAD_MS, rate)]
     t = LEAD_MS
     words: list[Word] = []
     sentences = split_sentences(text)
     for i, sent in enumerate(sentences):
-        with _LOCK:
-            if tts.resolve_voice_name(voice_name) is None:
-                raise RuntimeError(f"Không có giọng VieNeu {voice_name!r}")
-            pcm = np.asarray(tts.infer(sent, voice=tts.get_preset_voice(voice_name)), dtype=np.float32).reshape(-1)
+        if tts.resolve_voice_name(voice_name) is None:
+            raise RuntimeError(f"Không có giọng VieNeu {voice_name!r}")
+        pcm = np.asarray(tts.infer(sent, voice=tts.get_preset_voice(voice_name)), dtype=np.float32).reshape(-1)
         dur = len(pcm) * 1000 / rate
         toks = sent.split()
         total_chars = sum(len(w) for w in toks) or 1
