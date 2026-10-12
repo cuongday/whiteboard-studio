@@ -1,5 +1,8 @@
 .superpowers/
+# dữ liệu dự án (kịch bản, ảnh, giọng, video)
 projects/
+# tài liệu thiết kế / kế hoạch
+docs/
 .venv/
 node_modules/
 __pycache__/
