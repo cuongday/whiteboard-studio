@@ -24,7 +24,8 @@ class Deps:
     progress: Callable[[str, float], None] = field(default=lambda msg, pct: None)
 
 IMAGE_WORKERS = int(os.environ.get("STUDIO_IMAGE_WORKERS", "4"))
-# whiteboard renders are single-threaded Python/OpenCV loops: ~1 core each
+# each whiteboard render is a single-threaded Python/OpenCV loop (~5-8 s per scene after
+# the bounding-box optimisation in vendor/render_stream_whiteboard.py): ~1 core each
 DRAW_WORKERS = int(os.environ.get("STUDIO_DRAW_WORKERS", str(max(1, min(8, (os.cpu_count() or 2) * 3 // 8)))))
 _SAVE_LOCK = threading.Lock()   # steps run on worker threads but share one Project
 

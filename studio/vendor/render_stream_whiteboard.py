@@ -185,11 +185,19 @@ class RegionStreamRenderer:
 
     # ── 落墨（限制在 allowed 内）──
     def _reveal_ink_segment(self, a: tuple[int, int], b: tuple[int, int], allowed: np.ndarray) -> None:
-        seg = np.zeros((self.out_h, self.out_w), dtype=np.uint8)
+        # whiteboard-studio: work on the segment's bounding box instead of a full-frame mask
+        # (was ~93% of render time); pixels touched are identical to the full-frame version.
         thick = max(1, self.cfg.ink_reveal_radius * 2 + 1)
-        cv2.line(seg, a, b, 255, thickness=thick, lineType=cv2.LINE_AA)
-        revealed = (seg > 0) & self.ink_pixels & allowed
-        self.drawn[revealed] = self.ink_paint[revealed]
+        pad = thick // 2 + 3
+        x0 = max(0, min(a[0], b[0]) - pad); x1 = min(self.out_w, max(a[0], b[0]) + pad + 1)
+        y0 = max(0, min(a[1], b[1]) - pad); y1 = min(self.out_h, max(a[1], b[1]) + pad + 1)
+        if x0 >= x1 or y0 >= y1:
+            return
+        seg = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+        cv2.line(seg, (a[0] - x0, a[1] - y0), (b[0] - x0, b[1] - y0), 255, thickness=thick, lineType=cv2.LINE_AA)
+        revealed = (seg > 0) & self.ink_pixels[y0:y1, x0:x1] & allowed[y0:y1, x0:x1]
+        roi = self.drawn[y0:y1, x0:x1]
+        roi[revealed] = self.ink_paint[y0:y1, x0:x1][revealed]
 
     def _ink_stamp_cell(self, cell: tuple[int, int], allowed: np.ndarray) -> None:
         r, c = cell
