@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, Element, Project, Scene } from "../api";
 
 const blank = (): Scene => ({ id: "new", text: "", key_idea: "", visual_description: "", elements: [], image_prompt: "",
-  status: { image: "pending", voice: "pending", draw: "pending" }, error: null, duration_ms: null });
+  status: { image: "pending", voice: "pending", draw: "pending" }, error: null, duration_ms: null, narration: "" });
 
 type Row = { s: Scene; raw: string };
 const fmt = (els: Element[]) => els.map((e) => `${e.label} | ${e.say}`).join("\n");

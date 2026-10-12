@@ -8,7 +8,7 @@ import { stageLabel } from "./labels";
 import NewProject from "./steps/NewProject";
 import ScenesReview from "./steps/ScenesReview";
 import ImagesReview from "./steps/ImagesReview";
-import RenderView from "./steps/RenderView";
+import ResultView from "./steps/ResultView";
 
 export type EditMode = null | "scenes" | "images";
 
@@ -136,8 +136,8 @@ export default function App() {
         onChange={setFromChild} beginAction={beginAction} afterAction={afterAction} />}
       {showImages && <ImagesReview project={project} busy={busy} tick={tick} beginAction={beginAction} afterAction={afterAction}
         onEditScenes={() => startEdit("scenes")} onRender={() => setEdit(null)} />}
-      {showRender && <RenderView project={project} busy={busy} version={renderCount} onRefresh={reload}
-        onEdit={startEdit} />}
+      {showRender && <ResultView project={project} busy={busy} version={renderCount}
+        beginAction={beginAction} afterAction={afterAction} onChange={setFromChild} onEdit={startEdit} />}
     </div>
   );
 }

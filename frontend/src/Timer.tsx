@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-const KIND_LABEL: Record<string, string> = { segment: "Chia cảnh", images: "Tạo ảnh", render: "Lồng tiếng & render" };
+const KIND_LABEL: Record<string, string> = { segment: "Chia cảnh", images: "Tạo ảnh", render: "Lồng tiếng & render",
+  compose: "Ghép video", rebuild_scene: "Dựng lại cảnh", new_version: "Tạo bản mới" };
 
 export const fmt = (s: number) => {
   const t = Math.max(0, Math.floor(s));
