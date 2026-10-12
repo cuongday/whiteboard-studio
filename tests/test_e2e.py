@@ -41,3 +41,20 @@ def test_e2e_two_scenes():
     assert kinds == {"video", "audio"}
     assert (v["width"], v["height"]) == (1920, 1080)
     assert abs(float(probe["format"]["duration"]) - 4.0) < 0.3
+
+
+def test_e2e_edit_scene_and_new_version():
+    p = store.create_project("e2e2", Settings(aspect="16:9", captions=True), "x")
+    d = pipeline.Deps(segment=seg, gen_image=img, synth=synth)
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
+    q = store.load(p.id); q.scenes[1].narration = "Tiền mất giá trị."; versions.invalidate_scene(q, "02", "voice"); store.save(q)
+    pipeline.run_rebuild_scene(p.id, d, version="v1", scene="02")
+    assert (versions.vscene_dir(p.id, "v1", "02") / "preview.mp4").exists()
+    pipeline.run_compose(p.id, d, version="v1")
+    v1_final = versions.vdir(p.id, "v1") / "final.mp4"; before = v1_final.stat().st_mtime
+    pipeline.run_new_version(p.id, d, voice="Mai Anh")
+    v2_final = versions.vdir(p.id, "v2") / "final.mp4"
+    assert v1_final.stat().st_mtime == before and v2_final.exists()
+    for f in (v1_final, v2_final):
+        probe = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", str(f)]))
+        assert abs(float(probe["format"]["duration"]) - 4.0) < 0.3

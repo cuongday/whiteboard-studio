@@ -61,6 +61,18 @@ Cổng mặc định là 8010; đổi bằng `make run PORT=9000`. Chế độ p
 5. **Cổng duyệt 2**: xem ảnh (tạo lại ảnh nào chưa ưng), duyệt để render.
 6. Hệ thống tổng hợp giọng, tính thời điểm vẽ, vẽ tay từng cảnh và ghép bằng Remotion thành `final.mp4`.
 
+## Sửa từng cảnh và phiên bản giọng
+
+Sau khi render, màn **Kết quả** hiện video cuối và lưới các cảnh (clip xem thử + phụ đề).
+
+- **Sửa** một cảnh: đổi phụ đề, viết **lời đọc** riêng (ví dụ phụ đề "API", lời đọc "ây pi ai") và bấm **Nghe thử**,
+  đổi giọng riêng cho cảnh, tạo lại ảnh (chọn model), đổi thứ tự / cụm từ kích hoạt của các đối tượng vẽ.
+  **Lưu & dựng lại cảnh** chỉ đọc + vẽ lại cảnh đó; sau đó bấm **Ghép lại** để cập nhật video.
+- **+ Bản mới với giọng này**: tạo phiên bản video mới (Bản 2, Bản 3…) dùng chung nội dung, giữ nguyên các bản cũ.
+  Sửa nội dung một cảnh áp dụng cho mọi bản (bản nào cũng hiện "Chưa ghép" cho tới khi ghép lại).
+- Dữ liệu: `projects/<id>/versions/<vN>/` chứa giọng, clip, bản xem thử và `final.mp4` của từng bản.
+  Dự án cũ tự chuyển thành "Bản 1" khi mở lần đầu.
+
 ## Cấu trúc dữ liệu
 
 Mọi thứ nằm dưới `projects/<id>/`: `project.json`, thư mục từng cảnh (ảnh, wav, `words.json`, clip vẽ) và `final.mp4`. Kết quả từng cảnh được cache nên chỉ cảnh thay đổi mới bị làm lại.
