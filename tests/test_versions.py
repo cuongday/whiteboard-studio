@@ -94,3 +94,39 @@ def test_narration_and_voice_helpers():
     v = Version(id="v1", label="x", voice="Hải Đăng")
     assert versions.effective_voice(v, VersionScene()) == "Hải Đăng"
     assert versions.effective_voice(v, VersionScene(voice="Mai Anh")) == "Mai Anh"
+
+
+def test_interrupted_migration_keeps_existing_destinations():
+    pid = _legacy()
+    pdir = store.project_dir(pid)
+    (pdir / "final.mp4").unlink()
+    vd = versions.vscene_dir(pid, "v1", "01")
+    (vd / "voice.wav").write_text("NEW")
+    (pdir / "versions" / "v1" / "final.mp4").write_text("vfinal")
+    (store.scene_dir(pid, "01") / "voice.wav").write_text("OLD")
+    p = store.load(pid)
+    v = versions.get(p)
+    assert v.final == "versions/v1/final.mp4" and v.scenes["01"].composed
+    assert (vd / "voice.wav").read_text() == "NEW"
+
+def test_load_does_not_write_on_mirror_only_difference():
+    p = store.create_project("t", Settings(), "x")
+    p.scenes = [Scene(id="01", text="a")]
+    versions.ensure(p)
+    store.save(p)
+    f = store.project_dir(p.id) / "project.json"
+    raw = json.loads(f.read_text())
+    raw["scenes"][0]["status"]["voice"] = "done"
+    f.write_text(json.dumps(raw))
+    m = f.stat().st_mtime_ns
+    q = store.load(p.id)
+    assert f.stat().st_mtime_ns == m
+    assert q.scenes[0].status["voice"] == "pending"
+
+def test_sync_active_tolerates_partial_status():
+    p = store.create_project("t", Settings(), "x")
+    p.scenes = [Scene(id="01", text="a")]
+    versions.ensure(p)
+    versions.get(p).scenes["01"].status = {}
+    versions.sync_active(p)
+    assert p.scenes[0].status["voice"] == "pending" and p.scenes[0].status["draw"] == "pending"

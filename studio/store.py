@@ -1,8 +1,11 @@
 import os
+import threading
 import uuid
 from pathlib import Path
 from . import config
 from .models import Project, Settings
+
+_LOAD_LOCK = threading.Lock()
 
 def project_dir(pid: str) -> Path:
     return config.PROJECTS_DIR / pid
@@ -28,7 +31,10 @@ def load(pid: str) -> Project:
     p = Project.model_validate_json(f.read_text(encoding="utf-8"))
     from . import versions
     if versions.ensure(p):
-        save(p)
+        with _LOAD_LOCK:
+            p = Project.model_validate_json(f.read_text(encoding="utf-8"))
+            versions.ensure(p)
+            save(p)
     return p
 
 def create_project(title: str, settings: Settings, source_text: str) -> Project:

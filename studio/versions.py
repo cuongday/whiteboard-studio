@@ -37,6 +37,8 @@ def effective_voice(v: Version, vs: VersionScene) -> str:
     return vs.voice or v.voice
 
 def _migrate_legacy(p: Project) -> Version:
+    """Move pre-version files into versions/v1. Idempotent at file level: never overwrites an
+    existing destination (legacy file is left in place), so an interrupted run can be redone."""
     v = Version(id="v1", label=label_for(1, p.settings.voice), voice=p.settings.voice)
     pdir = store.project_dir(p.id)
     for s in p.scenes:
@@ -46,17 +48,26 @@ def _migrate_legacy(p: Project) -> Version:
         src = pdir / "scenes" / s.id
         for f in LEGACY_FILES:
             if (src / f).exists():
-                os.replace(src / f, vscene_dir(p.id, "v1", s.id) / f)
-    if (pdir / "final.mp4").exists():
-        vdir(p.id, "v1").mkdir(parents=True, exist_ok=True)
-        os.replace(pdir / "final.mp4", vdir(p.id, "v1") / "final.mp4")
+                dst = vscene_dir(p.id, "v1", s.id) / f
+                if not dst.exists():
+                    os.replace(src / f, dst)
+    vfinal = vdir(p.id, "v1") / "final.mp4"
+    if not vfinal.exists() and (pdir / "final.mp4").exists():
+        vfinal.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(pdir / "final.mp4", vfinal)
+    if vfinal.exists():
         v.final = "versions/v1/final.mp4"
         for vs in v.scenes.values():
             vs.composed = vs.status["draw"] == "done"
     return v
 
 def ensure(p: Project) -> bool:
-    """Create v1 (migrating pre-version files) and keep every version's scene keys == p.scenes."""
+    """Create v1 (migrating pre-version files) and keep every version's scene keys == p.scenes.
+
+    Returns True ONLY for structural changes (v1 created/migrated, active_version repaired,
+    version scene keys added/removed). It also calls sync_active to refresh the in-memory
+    mirror, but mirror-only differences do not count (save applies the mirror anyway).
+    Matching is by scene id: callers that renumber scenes must call `renumber` first."""
     changed = False
     if not p.versions:
         p.versions = [_migrate_legacy(p)]
@@ -70,7 +81,8 @@ def ensure(p: Project) -> bool:
             v.scenes[sid] = VersionScene(); changed = True
         for sid in set(v.scenes) - ids:
             del v.scenes[sid]; changed = True
-    return sync_active(p) or changed
+    sync_active(p)
+    return changed
 
 def sync_active(p: Project) -> bool:
     try:
@@ -82,7 +94,7 @@ def sync_active(p: Project) -> bool:
         vs = v.scenes.get(s.id)
         if vs is None:
             continue
-        mirrored = {"image": s.status.get("image", "pending"), "voice": vs.status["voice"], "draw": vs.status["draw"]}
+        mirrored = {"image": s.status.get("image", "pending"), "voice": vs.status.get("voice", "pending"), "draw": vs.status.get("draw", "pending")}
         if mirrored != s.status or s.duration_ms != vs.duration_ms:
             s.status = mirrored; s.duration_ms = vs.duration_ms; changed = True
     if p.final != v.final:
@@ -94,8 +106,9 @@ def invalidate_scene(p: Project, sid: str, from_step: str, vid: str | None = Non
     vid limits the version part to one version (per-scene voice override)."""
     assert from_step in ("image", "voice", "draw"), from_step
     if from_step == "image":
-        s = next(x for x in p.scenes if x.id == sid)
-        s.status["image"] = "pending"; s.error = None
+        s = next((x for x in p.scenes if x.id == sid), None)
+        if s is not None:
+            s.status["image"] = "pending"; s.error = None
     for v in p.versions:
         if vid and v.id != vid:
             continue
