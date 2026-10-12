@@ -150,6 +150,7 @@ def test_render_writes_version_files():
         assert (vd / f).exists(), f
     q = store.load(pid)
     assert all(vs.composed for vs in versions.get(q).scenes.values())
+    assert versions.get(q).scenes["01"].built_at is not None and q.scenes[0].image_at is not None
 
 def test_narration_differs_from_subtitle():
     pid, d = _done_project()

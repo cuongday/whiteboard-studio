@@ -38,7 +38,7 @@ export default function ImagesReview({ project, busy, tick, beginAction, afterAc
           <div className="card" key={s.id}>
             <b>Cảnh {s.id}</b> <span className={`badge ${s.status.image}`}>{stepLabel(s.status.image)}</span>
             {s.status.image === "done"
-              ? <img src={api.file(project.id, `scenes/${s.id}/image.png`, `${project.created_at}-${regen[s.id] ?? 0}-${doneAt[s.id] ?? 0}-${tick}`)} />
+              ? <img src={api.file(project.id, `scenes/${s.id}/image.png`, `${project.created_at}-${regen[s.id] ?? 0}-${doneAt[s.id] ?? 0}-${tick}-${s.image_at ?? 0}`)} />
               : <div className="placeholder">{s.status.image === "running" ? "Đang vẽ…" : s.error ?? "Chưa có ảnh"}</div>}
             {s.image_model && s.status.image === "done" && <span className="model-tag">Vẽ bằng {modelLabel(s.image_model)}</span>}
             <p className="small">{s.text}</p>

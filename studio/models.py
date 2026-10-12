@@ -22,12 +22,14 @@ class Scene(BaseModel):
     error: str | None = None
     duration_ms: int | None = None
     image_model: str | None = None   # model that drew the current image.png
+    image_at: float | None = None    # epoch seconds image.png was last written
 
 class VersionScene(BaseModel):
     voice: str | None = None         # per-scene voice override; None = version voice
     status: dict[str, StepState] = Field(default_factory=lambda: {"voice": "pending", "draw": "pending"})
     error: str | None = None
     duration_ms: int | None = None
+    built_at: float | None = None    # epoch seconds preview.mp4 was last written
     composed: bool = False           # clip is part of the version's current final.mp4
 
 class Version(BaseModel):

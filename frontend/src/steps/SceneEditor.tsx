@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, Element, Project, Scene, Version } from "../api";
 import { ModelSelect, useModels } from "../models";
 
@@ -16,6 +16,20 @@ export default function SceneEditor({ project, version, scene, busy, voices, onC
   const [listening, setListening] = useState(false);
   const [err, setErr] = useState("");
   const models = useModels();
+  const asideRef = useRef<HTMLElement>(null);
+  const initial = useRef({ text: scene.text, narration: scene.narration, voice: vs?.voice ?? version.voice, els: JSON.stringify(scene.elements) });
+  const isDirty = () => text !== initial.current.text || narration !== initial.current.narration
+    || voice !== initial.current.voice || JSON.stringify(els) !== initial.current.els;
+  const tryClose = () => { if (!isDirty() || window.confirm("Bỏ các thay đổi chưa lưu?")) onClose(); };
+  const closeRef = useRef(tryClose); closeRef.current = tryClose;
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    asideRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeRef.current(); };
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); prev?.focus?.(); };
+  }, []);
+  useEffect(() => { setListenUrl(""); }, [text, narration, voice]);
 
   const move = (i: number, d: number) => {
     const j = i + d; if (j < 0 || j >= els.length) return;
@@ -43,9 +57,9 @@ export default function SceneEditor({ project, version, scene, busy, voices, onC
   };
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <aside className="drawer" role="dialog" aria-label={`Sửa cảnh ${scene.id}`} onClick={(e) => e.stopPropagation()}>
-        <div className="row between"><h2>Sửa cảnh {scene.id}</h2><button onClick={onClose} aria-label="Đóng">✕</button></div>
+    <div className="drawer-backdrop" onClick={tryClose}>
+      <aside ref={asideRef} tabIndex={-1} className="drawer" role="dialog" aria-modal="true" aria-label={`Sửa cảnh ${scene.id}`} onClick={(e) => e.stopPropagation()}>
+        <div className="row between"><h2>Sửa cảnh {scene.id}</h2><button onClick={tryClose} aria-label="Đóng">✕</button></div>
         {err && <div className="error">{err}</div>}
         {vs?.error && <div className="error">{vs.error}</div>}
         <label>Phụ đề (chữ hiện trên video)<textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} /></label>
@@ -62,7 +76,7 @@ export default function SceneEditor({ project, version, scene, busy, voices, onC
         </div>
         {listenUrl && <audio controls autoPlay src={listenUrl} />}
         <h3>Ảnh</h3>
-        <img className="drawer-img" src={api.file(project.id, `scenes/${scene.id}/image.png`, `${scene.image_model}-${scene.status.image}`)} alt={`Ảnh cảnh ${scene.id}`} />
+        <img className="drawer-img" src={api.file(project.id, `scenes/${scene.id}/image.png`, String(scene.image_at ?? 0))} alt={`Ảnh cảnh ${scene.id}`} />
         <div className="regen">
           {models && <ModelSelect label="Model tạo ảnh" options={models.image} value={imageModel} onChange={setImageModel} />}
           <button type="button" disabled={busy} onClick={regen}>Tạo lại ảnh</button>

@@ -19,6 +19,7 @@ export default function ResultView({ project, busy, version, beginAction, afterA
   const [newVoice, setNewVoice] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [missing, setMissing] = useState<Record<string, boolean>>({});
   useEffect(() => { api.voices().then(setVoices).catch(() => {}); }, []);
   const v = project.versions.find((x) => x.id === project.active_version) ?? project.versions[0];
   if (!v) return null;
@@ -40,7 +41,7 @@ export default function ResultView({ project, busy, version, beginAction, afterA
             <option value="">Chọn giọng…</option>
             {voices.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
-          <button disabled={busy || !newVoice} onClick={() => run(() => api.newVersion(project.id, newVoice))}>+ Bản mới với giọng này</button>
+          <button disabled={busy || !newVoice} onClick={() => run(async () => { await api.newVersion(project.id, newVoice); setNewVoice(""); })}>+ Bản mới với giọng này</button>
         </span>
       </div>
       {err && <div className="error">{err}</div>}
@@ -70,20 +71,21 @@ export default function ResultView({ project, busy, version, beginAction, afterA
             <div className="card" key={s.id}>
               <div className="row between"><b>Cảnh {s.id}</b><span className={`badge ${cls}`}>{text}</span></div>
               {vs?.status.draw === "done"
-                ? <CaptionedPreview pid={project.id} base={base} bust={`${vs.duration_ms}-${vs.composed}-${version}-${s.text.length}`}
-                    poster={api.file(project.id, `scenes/${s.id}/image.png`)} />
-                : <img src={api.file(project.id, `scenes/${s.id}/image.png`)} alt={`Ảnh cảnh ${s.id}`} />}
+                ? <CaptionedPreview pid={project.id} base={base} bust={`${vs.built_at}-${vs.composed}`}
+                    poster={api.file(project.id, `scenes/${s.id}/image.png`, String(s.image_at ?? 0))}
+                    onMissing={() => setMissing((m) => (m[s.id] ? m : { ...m, [s.id]: true }))} />
+                : <img src={api.file(project.id, `scenes/${s.id}/image.png`, String(s.image_at ?? 0))} alt={`Ảnh cảnh ${s.id}`} />}
               {vs?.voice && <span className="model-tag">Giọng riêng: {vs.voice}</span>}
               {vs?.error && <p className="small error">{vs.error}</p>}
               <div className="row">
                 <button disabled={busy} onClick={() => setEditing(s.id)}>Sửa</button>
-                {cls === "pending" && <button disabled={busy} onClick={() => run(() => api.rebuildScene(project.id, v.id, s.id))}>Dựng lại</button>}
+                {(cls === "pending" || missing[s.id]) && <button disabled={busy} onClick={() => run(async () => { await api.rebuildScene(project.id, v.id, s.id); setMissing((m) => ({ ...m, [s.id]: false })); })}>Dựng lại</button>}
               </div>
             </div>
           );
         })}
       </div>
-      {scene && <SceneEditor project={project} version={v} scene={scene} busy={busy} voices={voices}
+      {scene && <SceneEditor key={scene.id} project={project} version={v} scene={scene} busy={busy} voices={voices}
         onClose={() => setEditing(null)} beginAction={beginAction} afterAction={afterAction} onSaved={onChange} />}
     </div>
   );

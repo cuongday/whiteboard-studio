@@ -1,7 +1,7 @@
 export type Element = { label: string; say: string };
 export type StepState = "pending" | "running" | "done" | "error";
 export type Scene = { id: string; text: string; key_idea: string; visual_description: string; elements: Element[];
-  image_prompt: string; status: Record<"image" | "voice" | "draw", StepState>; error: string | null; duration_ms: number | null; image_model?: string | null; narration: string };
+  image_prompt: string; status: Record<"image" | "voice" | "draw", StepState>; error: string | null; duration_ms: number | null; image_model?: string | null; image_at?: number | null; narration: string };
 export type Settings = { aspect: "16:9" | "9:16"; voice: string; captions: boolean; music: boolean; music_file: string | null;
   text_model: string; image_model: string };
 export type Project = { id: string; title: string; created_at: string; settings: Settings; source_text: string;
@@ -13,7 +13,7 @@ export type JobEvent = { pid: string; type: "progress" | "done" | "error"; msg: 
 const JSONH = { "Content-Type": "application/json" };
 
 export type VersionScene = { voice: string | null; status: Record<"voice" | "draw", StepState>; error: string | null;
-  duration_ms: number | null; composed: boolean };
+  duration_ms: number | null; composed: boolean; built_at?: number | null };
 export type Version = { id: string; label: string; voice: string; created_at: string;
   scenes: Record<string, VersionScene>; final: string | null; timings: Record<string, number> };
 

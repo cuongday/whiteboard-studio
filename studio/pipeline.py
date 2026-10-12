@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
@@ -76,6 +77,7 @@ def run_images(pid: str, deps: Deps, only: list[str] | None = None, model: str |
             deps.gen_image(s.image_prompt, p.settings.aspect, out, model=used)
             s.image_model = used
             _fit(out, config.ASPECTS[p.settings.aspect])
+            s.image_at = time.time()
         _step(p, s, s.id, "image", work, deps, i, len(todo), "Vẽ ảnh")
     if only is not None:
         for s in todo:
@@ -109,6 +111,7 @@ def _build(p, v, deps, sids: list[str]) -> None:
             ann = deps.annotate(img, s.elements, words, vs.duration_ms)
             deps.draw(img, ann, d / "clip.mp4", fps=config.FPS)
             deps.preview(d / "clip.mp4", d / "voice.wav", d / "preview.mp4")
+            vs.built_at = time.time()
         _step(p, vs, s.id, "draw", dr, deps, order[s.id], n, "Vẽ animation")
 
     def voice_scene(s):
