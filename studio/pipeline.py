@@ -5,6 +5,7 @@ jobs hold a stale Project and save the whole thing after each step.
 """
 import json
 import os
+import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -96,8 +97,11 @@ def _build(p, v, deps, sids: list[str]) -> None:
     def draw_scene(s):
         vs = v.scenes[s.id]; d = versions.vscene_dir(pid, v.id, s.id)
         def dr():
-            src = d / "narration.json" if (d / "narration.json").exists() else d / "words.json"
-            narr_words = json.loads(src.read_text(encoding="utf-8"))
+            if not (d / "narration.json").exists() and (d / "words.json").exists():
+                # migrated pre-version scene: its words.json IS the narration timing; keep a copy
+                # because words.json is about to be overwritten with subtitle timings
+                shutil.copyfile(d / "words.json", d / "narration.json")
+            narr_words = json.loads((d / "narration.json").read_text(encoding="utf-8"))
             spans = json.loads((d / "spans.json").read_text()) if (d / "spans.json").exists() else None
             words = voice.subtitle_words(s.text, versions.narration_of(s), narr_words, spans)
             (d / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")

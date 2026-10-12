@@ -194,3 +194,14 @@ def test_per_scene_voice_override():
     synth_calls.clear()
     pipeline.run_rebuild_scene(pid, d, version="v1", scene="02")
     assert synth_calls[0][3] == "Mai Anh"
+
+def test_legacy_scene_keeps_narration_timing_across_redraws():
+    pid, d = _done_project()
+    vd = versions.vscene_dir(pid, "v1", "01")
+    narr = (vd / "narration.json").read_text()
+    (vd / "narration.json").unlink()            # as after migrating a pre-version project
+    (vd / "words.json").write_text(narr)
+    pipeline.run_rebuild_scene(pid, d, version="v1", scene="01")
+    assert (vd / "narration.json").read_text() == narr
+    pipeline.run_rebuild_scene(pid, d, version="v1", scene="01")
+    assert (vd / "narration.json").read_text() == narr
