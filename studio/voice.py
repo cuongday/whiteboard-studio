@@ -25,6 +25,20 @@ def get_tts():
         _TTS["t"] = Vieneu(mode=os.environ.get("VIENEU_MODE", "v3turbo"))
     return _TTS["t"]
 
+DEFAULT_VOICE = "Hải Đăng"
+_VOICES: list[dict] = []
+
+def list_voices(tts=None) -> list[dict]:
+    """Preset VieNeu voices as [{id, label}]; falls back to the default voice if VieNeu can't load."""
+    if _VOICES:
+        return _VOICES
+    try:
+        presets = (tts or get_tts()).list_preset_voices()
+    except Exception:  # noqa: BLE001
+        return [{"id": DEFAULT_VOICE, "label": DEFAULT_VOICE}]
+    _VOICES.extend({"id": vid, "label": label.lstrip("⭐ ").strip()} for label, vid in presets)
+    return _VOICES
+
 def split_sentences(text: str) -> list[str]:
     parts = re.split(r"(?<=[.!?…])\s+|\n+", text.strip())
     return [p.strip() for p in parts if p.strip()]

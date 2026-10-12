@@ -23,3 +23,17 @@ def test_synthesize_timings(tmp_path):
     expect = voice.LEAD_MS + 200 + voice.GAP_MS + 300 + voice.TAIL_MS
     assert abs(len(data) / sr * 1000 - expect) < 2
     assert json.loads((tmp_path / "words.json").read_text())[4]["text"] == "năm."
+
+def test_list_voices(monkeypatch):
+    monkeypatch.setattr(voice, "_VOICES", [])
+    class T:
+        def list_preset_voices(self):
+            return [("⭐ Hải Đăng — Nam · Bắc", "Hải Đăng"), ("Mai Anh — Nữ · Bắc", "Mai Anh")]
+    assert voice.list_voices(T()) == [{"id": "Hải Đăng", "label": "Hải Đăng — Nam · Bắc"},
+                                      {"id": "Mai Anh", "label": "Mai Anh — Nữ · Bắc"}]
+
+def test_list_voices_fallback(monkeypatch):
+    monkeypatch.setattr(voice, "_VOICES", [])
+    class Broken:
+        def list_preset_voices(self): raise RuntimeError("no model")
+    assert voice.list_voices(Broken()) == [{"id": "Hải Đăng", "label": "Hải Đăng"}]

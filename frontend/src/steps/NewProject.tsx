@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, Project } from "../api";
 import { stageLabel } from "../labels";
 
 export default function NewProject({ list, onOpen, onCreated }: { list: Project[]; onOpen: (id: string) => void; onCreated: (p: Project) => void }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [voices, setVoices] = useState<{ id: string; label: string }[]>([{ id: "Hải Đăng", label: "Hải Đăng" }]);
+  useEffect(() => { api.voices().then((v) => v.length && setVoices(v)).catch(() => {}); }, []);
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); setErr(""); setBusy(true);
     const fd = new FormData(e.currentTarget);
@@ -22,7 +24,11 @@ export default function NewProject({ list, onOpen, onCreated }: { list: Project[
         <label>…hoặc tải file (.txt .docx .srt .pdf)<input type="file" name="file" accept=".txt,.docx,.srt,.pdf" /></label>
         <div className="row">
           <label>Tỉ lệ<select name="aspect"><option value="16:9">16:9 YouTube</option><option value="9:16">9:16 TikTok/Shorts</option></select></label>
-          <label>Giọng VieNeu<input name="voice" defaultValue="Hải Đăng" /></label>
+          <label>Giọng VieNeu
+            <select name="voice" defaultValue="Hải Đăng" key={voices.length}>
+              {voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+            </select>
+          </label>
         </div>
         <div className="row">
           <label className="check"><input type="checkbox" name="captions" defaultChecked /> Phụ đề karaoke</label>

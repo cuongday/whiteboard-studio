@@ -63,6 +63,11 @@ def _submit(pid, kind, **kw):
     if not JOBS.submit(pid, kind, **kw):
         raise HTTPException(409, "Đang có tác vụ khác chạy")
 
+@app.get("/api/voices")
+async def voices():
+    from .voice import list_voices
+    return await asyncio.to_thread(list_voices)
+
 @app.get("/api/health")
 def health():
     return {"checks": run_checks()}

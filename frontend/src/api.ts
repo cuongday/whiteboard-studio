@@ -17,6 +17,7 @@ async function j<T>(r: Promise<Response>): Promise<T> {
   return res.json();
 }
 export const api = {
+  voices: () => j<{ id: string; label: string }[]>(fetch("/api/voices")),
   health: () => j<{ checks: { name: string; ok: boolean; hint: string }[] }>(fetch("/api/health")),
   list: () => j<Project[]>(fetch("/api/projects")),
   get: (id: string) => j<Project>(fetch(`/api/projects/${id}`)),
