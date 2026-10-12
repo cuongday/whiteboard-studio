@@ -176,7 +176,6 @@ def _build_and_compose(p, v, deps) -> None:
 
 def run_render(pid: str, deps: Deps) -> None:
     p = store.load(pid)
-    p.stage = "rendering"
     _build_and_compose(p, versions.get(p), deps)
 
 def run_compose(pid: str, deps: Deps, version: str) -> None:

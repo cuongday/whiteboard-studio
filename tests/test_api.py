@@ -278,3 +278,17 @@ def test_listen(monkeypatch):
     def busy(*a, **k): raise TimeoutError()
     monkeypatch.setattr(voice_mod, "synthesize", busy)
     assert c.post(f"/api/projects/{pid}/scenes/01/listen", json={"narration": "a", "voice": "Hải Đăng"}).status_code == 503
+
+def test_unchanged_scene_save_keeps_done(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _done(c, r)
+    sc = c.get(f"/api/projects/{pid}").json()["scenes"]
+    out = c.put(f"/api/projects/{pid}/scenes", json=sc).json()
+    assert out["stage"] == "done" and out["final"] == "versions/v1/final.mp4"
+
+def test_reset_stale_keeps_done_when_final_exists(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _done(c, r)
+    p = store.load(pid); p.stage = "rendering"; store.save(p)
+    app_mod.reset_stale()
+    assert store.load(pid).stage == "done"

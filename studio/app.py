@@ -36,7 +36,8 @@ def reset_stale() -> None:
                         if val == "running":
                             vs.status[k] = "pending"; changed = True
             if p.stage == "rendering":
-                p.stage = "images"; changed = True
+                # a project that already has a playable video stays on the result screen
+                p.stage = "done" if any(v.final for v in p.versions) else "images"; changed = True
             if changed:
                 store.save(p)
         except Exception:  # noqa: BLE001
@@ -166,7 +167,8 @@ def update_scenes(pid: str, scenes: list[Scene]):
     versions.ensure(p)
     for nid, step in inval:
         versions.invalidate_scene(p, nid, step)
-    if p.stage == "done":
+    structural = set(moves) != set(old) or any(nid != oid for nid, oid in moves.items()) or len(new) != len(old)
+    if p.stage == "done" and (inval or structural):
         p.stage = "images"
     store.save(p)
     return p.model_dump()
@@ -182,7 +184,8 @@ def update_settings(pid: str, settings: Settings):
         v.voice = settings.voice
         v.label = versions.label_for(int(v.id[1:]), settings.voice)
         for s_ in p.scenes:
-            if v.scenes[s_.id].status["voice"] == "done":
+            vs_ = v.scenes.get(s_.id)
+            if vs_ is not None and vs_.status["voice"] == "done":
                 versions.invalidate_scene(p, s_.id, "voice", vid=v.id); invalidated = True
         v.final = None
     if settings.aspect != p.settings.aspect:
