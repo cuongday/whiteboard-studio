@@ -13,6 +13,8 @@ def scene_dir(pid: str, scene_id: str) -> Path:
     return d
 
 def save(p: Project) -> None:
+    from . import versions
+    versions.sync_active(p)
     d = project_dir(p.id)
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / "project.json.tmp"
@@ -23,7 +25,11 @@ def load(pid: str) -> Project:
     f = project_dir(pid) / "project.json"
     if not f.exists():
         raise KeyError(pid)
-    return Project.model_validate_json(f.read_text(encoding="utf-8"))
+    p = Project.model_validate_json(f.read_text(encoding="utf-8"))
+    from . import versions
+    if versions.ensure(p):
+        save(p)
+    return p
 
 def create_project(title: str, settings: Settings, source_text: str) -> Project:
     p = Project(id=uuid.uuid4().hex[:10], title=title or "Dự án mới", settings=settings, source_text=source_text)
