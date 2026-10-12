@@ -768,7 +768,7 @@ def build_annotation(image: Path, elements: list[Element], words: list[dict], du
 
 **Interfaces:**
 - Consumes: annotation dict from Task 5
-- Produces: `draw.render_clip(image:Path, annotation:dict, out:Path, size:tuple[int,int], fps:int=30) -> Path` (silent MP4; raises `RuntimeError` with stderr tail). Resizes image to `size` first and scales annotation coordinates accordingly — actually the renderer handles scaling from `canvas`, so we only pass `--fps`.
+- Produces: `draw.render_clip(image:Path, annotation:dict, out:Path, fps:int=30) -> Path` (silent MP4; raises `RuntimeError` with stderr tail). Output size = image size (images are pre-fitted to the aspect preset in Task 8).
 
 - [ ] **Step 1: Check renderer flags** `python studio/vendor/render_stream_whiteboard.py --help` — confirm `--fps`, `--total-ms`. Output size follows image size; Task 8 ensures images are resized to the aspect preset before annotation.
 
@@ -813,7 +813,6 @@ def render_clip(image: Path, annotation: dict, out: Path, fps: int = 30) -> Path
         raise RuntimeError("Lỗi vẽ cảnh: " + (r.stderr or r.stdout)[-800:])
     return out
 ```
-(Drop the `size` parameter from the interface: size comes from the image.)
 
 - [ ] **Step 5: Run** `pytest tests/test_draw.py -v` → PASS (may take ~10–30 s).
 - [ ] **Step 6: Commit** `git add -A && git commit -m "feat: whiteboard clip renderer wrapper"`
