@@ -13,15 +13,25 @@
 
 ```bash
 gcloud auth application-default login
-export GOOGLE_CLOUD_PROJECT=ten-project-cua-ban
 gcloud services enable aiplatform.googleapis.com   # bật Vertex AI API cho project
+cp .env.example .env                               # rồi sửa giá trị
 ```
 
-Biến môi trường tuỳ chọn:
+Cấu hình đặt trong file `.env` ở gốc repo (đã gitignore; biến môi trường thật được ưu tiên hơn):
+
+```dotenv
+GOOGLE_CLOUD_PROJECT=ten-project-cua-ban
+GOOGLE_IMAGE_LOCATION=global          # vùng gọi Gemini (chia cảnh + tạo ảnh)
+GOOGLE_VIDEO_LOCATION=us-central1     # dự phòng cho model video sau này
+ADC_HOST_PATH=/home/<user>/.config/gcloud/application_default_credentials.json
+```
+
+`ADC_HOST_PATH` được gán vào `GOOGLE_APPLICATION_CREDENTIALS` khi khởi động.
+
+Biến tuỳ chọn khác:
 
 | Biến | Mặc định |
 |---|---|
-| `GOOGLE_CLOUD_LOCATION` | `global` |
 | `GEMINI_TEXT_MODEL` | `gemini-2.5-flash` |
 | `GEMINI_IMAGE_MODEL` | `gemini-2.5-flash-image` |
 | `VIENEU_MODE` | `v3turbo` |
@@ -51,7 +61,7 @@ Mọi thứ nằm dưới `projects/<id>/`: `project.json`, thư mục từng c�
 
 ## Xử lý sự cố
 
-- **Lỗi ADC / credentials**: chạy lại `gcloud auth application-default login`, kiểm tra `GOOGLE_CLOUD_PROJECT` và đã bật `aiplatform.googleapis.com`.
+- **Lỗi ADC / credentials**: chạy lại `gcloud auth application-default login`, kiểm tra `GOOGLE_CLOUD_PROJECT`/`ADC_HOST_PATH` trong `.env` và đã bật `aiplatform.googleapis.com`.
 - **Lần đầu dùng VieNeu** mất khoảng 20-40 giây để tải model.
 - **Lần render đầu tiên**: Remotion tải Chrome headless nên lâu hơn bình thường và cần mạng.
 - **Cổng bị chiếm**: đổi `PORT` (Makefile) và target proxy trong `frontend/vite.config.ts`.

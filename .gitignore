@@ -6,3 +6,4 @@ __pycache__/
 composer/out/
 frontend/dist/
 *.egg-info/
+.env
