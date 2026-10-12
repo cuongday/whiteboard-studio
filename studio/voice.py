@@ -2,6 +2,7 @@ import json
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import TypedDict
 import numpy as np
@@ -41,10 +42,17 @@ def _threads_per_worker() -> int:
 
 class _Borrow:
     """Context manager lending one VieNeu instance exclusively (created lazily up to VOICE_WORKERS)."""
+    def __init__(self, timeout: float | None = None):
+        self.timeout = timeout
+
     def __enter__(self):
         with _AVAILABLE:
+            deadline = None if self.timeout is None else time.monotonic() + self.timeout
             while not _POOL and _CREATED[0] >= max(1, VOICE_WORKERS):
-                _AVAILABLE.wait()
+                left = None if deadline is None else deadline - time.monotonic()
+                if left is not None and left <= 0:
+                    raise TimeoutError("Hết bản VieNeu rảnh")
+                _AVAILABLE.wait(left)
             if _POOL:
                 self.tts = _POOL.pop()
                 return self.tts
@@ -82,9 +90,40 @@ def split_sentences(text: str) -> list[str]:
 def _silence(ms: int, rate: int) -> np.ndarray:
     return np.zeros(int(rate * ms / 1000), dtype=np.float32)
 
-def synthesize(text: str, voice_name: str, out_wav: Path, tts=None) -> list[Word]:
+def _spread(toks: list[str], a: float, b: float) -> list[Word]:
+    """Spread tokens over [a, b] proportionally to character length."""
+    total = sum(len(t) for t in toks) or 1
+    out: list[Word] = []
+    acc = 0
+    for t in toks:
+        s = a + (b - a) * acc / total
+        acc += len(t)
+        out.append({"text": t, "start_ms": round(s), "end_ms": round(a + (b - a) * acc / total)})
+    return out
+
+def subtitle_words(text: str, narration: str, narration_words: list[Word], spans) -> list[Word]:
+    """Caption timings for `text` when TTS read `narration` (they differ e.g. for spelled-out terms).
+    Same sentence count -> sentence i of the subtitle takes the time of narration sentence i;
+    otherwise the subtitle is spread over the whole speech."""
+    if text.strip() == narration.strip() or not text.strip():
+        return narration_words
+    subs = split_sentences(text)
+    if spans and len(spans) == len(subs):
+        out: list[Word] = []
+        for sent, (a, b) in zip(subs, spans):
+            out += _spread(sent.split(), a, b)
+        return out
+    if spans:
+        a, b = spans[0][0], spans[-1][1]
+    elif narration_words:
+        a, b = narration_words[0]["start_ms"], narration_words[-1]["end_ms"]
+    else:
+        return []
+    return _spread(text.split(), a, b)
+
+def synthesize(text: str, voice_name: str, out_wav: Path, tts=None, timeout: float | None = None) -> list[Word]:
     if tts is None:
-        with _Borrow() as borrowed:
+        with _Borrow(timeout) as borrowed:
             return _synthesize(text, voice_name, out_wav, borrowed)
     return _synthesize(text, voice_name, out_wav, tts)
 
@@ -93,19 +132,15 @@ def _synthesize(text: str, voice_name: str, out_wav: Path, tts) -> list[Word]:
     chunks = [_silence(LEAD_MS, rate)]
     t = LEAD_MS
     words: list[Word] = []
+    spans: list[list[int]] = []
     sentences = split_sentences(text)
     for i, sent in enumerate(sentences):
         if tts.resolve_voice_name(voice_name) is None:
             raise RuntimeError(f"Không có giọng VieNeu {voice_name!r}")
         pcm = np.asarray(tts.infer(sent, voice=tts.get_preset_voice(voice_name)), dtype=np.float32).reshape(-1)
         dur = len(pcm) * 1000 / rate
-        toks = sent.split()
-        total_chars = sum(len(w) for w in toks) or 1
-        acc = 0.0
-        for w in toks:
-            s = t + dur * acc / total_chars
-            acc += len(w)
-            words.append({"text": w, "start_ms": round(s), "end_ms": round(t + dur * acc / total_chars)})
+        words += _spread(sent.split(), t, t + dur)
+        spans.append([round(t), round(t + dur)])
         chunks.append(pcm)
         t += dur
         if i < len(sentences) - 1:
@@ -114,6 +149,7 @@ def _synthesize(text: str, voice_name: str, out_wav: Path, tts) -> list[Word]:
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     sf.write(out_wav, np.concatenate(chunks), rate, subtype="PCM_16")
     out_wav.with_name("words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
+    out_wav.with_name("spans.json").write_text(json.dumps(spans), encoding="utf-8")
     return words
 
 def wav_duration_ms(path: Path) -> int:

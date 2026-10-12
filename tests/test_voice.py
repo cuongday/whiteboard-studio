@@ -54,3 +54,39 @@ def test_pool_reuses_instances_and_caps(monkeypatch):
     for t in ts: t.start()
     for t in ts: t.join()
     assert len(made) == 2 and len(voice._POOL) == 2
+
+
+def test_spans_written(tmp_path):
+    voice.synthesize("Một hai. Ba bốn năm.", "Hải Đăng", tmp_path / "voice.wav", tts=FakeTTS())
+    spans = json.loads((tmp_path / "spans.json").read_text())
+    assert spans == [[voice.LEAD_MS, voice.LEAD_MS + 200],
+                     [voice.LEAD_MS + 200 + voice.GAP_MS, voice.LEAD_MS + 200 + voice.GAP_MS + 300]]
+
+def test_subtitle_same_as_narration_returns_narration_words():
+    w = [{"text": "a", "start_ms": 0, "end_ms": 5}]
+    assert voice.subtitle_words("a", "a", w, [[0, 5]]) is w
+
+def test_subtitle_aligned_per_sentence():
+    spans = [[300, 1300], [1550, 2550]]
+    out = voice.subtitle_words("API mới. Rất nhanh.", "ây pi ai mới. Rất nhanh.", [], spans)
+    assert [x["text"] for x in out] == ["API", "mới.", "Rất", "nhanh."]
+    assert out[0]["start_ms"] == 300 and out[1]["end_ms"] == 1300
+    assert out[2]["start_ms"] == 1550 and out[3]["end_ms"] == 2550
+
+def test_subtitle_sentence_mismatch_spreads_over_speech():
+    spans = [[300, 1000], [1250, 2000]]
+    out = voice.subtitle_words("Một câu duy nhất", "Câu một. Câu hai.", [], spans)
+    assert out[0]["start_ms"] == 300 and out[-1]["end_ms"] == 2000
+
+def test_subtitle_without_spans_uses_word_range():
+    words = [{"text": "x", "start_ms": 100, "end_ms": 200}, {"text": "y", "start_ms": 200, "end_ms": 900}]
+    out = voice.subtitle_words("A B", "x y", words, None)
+    assert out[0]["start_ms"] == 100 and out[-1]["end_ms"] == 900
+
+def test_borrow_timeout(monkeypatch):
+    import pytest
+    monkeypatch.setattr(voice, "VOICE_WORKERS", 1)
+    monkeypatch.setattr(voice, "_POOL", [])
+    monkeypatch.setattr(voice, "_CREATED", [1])     # the only instance is lent out
+    with pytest.raises(TimeoutError):
+        voice.synthesize("a", "Hải Đăng", __import__("pathlib").Path("/tmp/x.wav"), timeout=0.1)
