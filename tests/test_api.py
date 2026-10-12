@@ -1,6 +1,6 @@
 import time
 from fastapi.testclient import TestClient
-from studio import app as app_mod, jobs, store
+from studio import app as app_mod, jobs, store, versions
 from tests.test_pipeline import deps
 
 def client(monkeypatch):
@@ -29,8 +29,9 @@ def test_create_from_upload_and_flow(monkeypatch):
     assert c.post(f"/api/projects/{pid}/approve/scenes").status_code == 200; wait(r)
     assert c.get(f"/api/projects/{pid}/files/scenes/01/image.png").status_code == 200
     assert c.post(f"/api/projects/{pid}/render").status_code == 200; wait(r)
-    assert c.get(f"/api/projects/{pid}").json()["stage"] == "done"
-    assert c.get(f"/api/projects/{pid}/files/final.mp4").content == b"final"
+    p = c.get(f"/api/projects/{pid}").json()
+    assert p["stage"] == "done" and p["final"] == "versions/v1/final.mp4"
+    assert c.get(f"/api/projects/{pid}/files/{p['final']}").content == b"final"
 
 def test_busy_and_traversal(monkeypatch):
     c, r = client(monkeypatch)
@@ -171,14 +172,17 @@ def test_reset_stale_skips_project_running_elsewhere(monkeypatch):
     import os, subprocess, sys
     from studio.models import Settings, Scene
     p = store.create_project("t", Settings(), "x")
-    p.scenes = [Scene(id="01", text="a", status={"image": "done", "voice": "running", "draw": "pending"})]
+    p.scenes = [Scene(id="01", text="a", status={"image": "done", "voice": "pending", "draw": "pending"})]
+    store.save(p); p = store.load(p.id)
+    from studio import versions
+    versions.get(p).scenes["01"].status["voice"] = "running"
     p.stage = "rendering"; store.save(p)
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         (store.project_dir(p.id) / ".job.pid").write_text(str(other.pid))
         app_mod.reset_stale()
         q = store.load(p.id)
-        assert q.stage == "rendering" and q.scenes[0].status["voice"] == "running"
+        assert q.stage == "rendering" and versions.get(q).scenes["01"].status["voice"] == "running"
     finally:
         other.kill(); other.wait()
     app_mod.reset_stale()   # owner gone -> stale state is reset
@@ -202,3 +206,75 @@ def test_models_endpoint_and_validation(monkeypatch):
                   json={"image_model": "gemini-3.1-flash-lite-image"}).status_code == 200; wait(r)
     sc = c.get(f"/api/projects/{pid}").json()["scenes"]
     assert sc[0]["image_model"] == "gemini-3.1-flash-lite-image"
+
+def _done(c, r):
+    pid = _flow_to_images(c, r)
+    c.post(f"/api/projects/{pid}/render"); wait(r)
+    return pid
+
+def test_scene_edit_invalidation(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _done(c, r)
+    v = lambda: versions.get(store.load(pid)).scenes["01"]   # noqa: E731
+    out = c.put(f"/api/projects/{pid}/scenes/01", json={"narration": "Gia tăng."}).json()
+    assert out["scenes"][0]["narration"] == "Gia tăng." and v().status == {"voice": "pending", "draw": "pending"}
+    c.post(f"/api/projects/{pid}/versions/v1/scenes/01/rebuild"); wait(r)
+    assert v().status == {"voice": "done", "draw": "done"} and v().composed is False
+    c.put(f"/api/projects/{pid}/scenes/01", json={"text": "Giá tăng mạnh."})        # narration set -> subtitle only
+    assert v().status == {"voice": "done", "draw": "pending"}
+    c.post(f"/api/projects/{pid}/versions/v1/scenes/01/rebuild"); wait(r)
+    c.put(f"/api/projects/{pid}/scenes/01", json={"elements": [{"label": "b", "say": "mạnh"}, {"label": "a", "say": "Giá"}]})
+    assert v().status == {"voice": "done", "draw": "pending"}
+    assert store.load(pid).stage == "done"
+
+def test_compose_and_versions(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _done(c, r)
+    c.put(f"/api/projects/{pid}/scenes/02", json={"text": "Tiền giảm mạnh."})
+    assert c.post(f"/api/projects/{pid}/versions/v1/compose").status_code == 200; wait(r)
+    p = store.load(pid)
+    assert all(vs.composed for vs in versions.get(p, "v1").scenes.values())
+    assert c.post(f"/api/projects/{pid}/versions", json={"voice": "Mai Anh"}).status_code == 200; wait(r)
+    p = c.get(f"/api/projects/{pid}").json()
+    assert [v["id"] for v in p["versions"]] == ["v1", "v2"] and p["active_version"] == "v2"
+    assert p["final"] == "versions/v2/final.mp4"
+    p = c.put(f"/api/projects/{pid}/active_version", json={"id": "v1"}).json()
+    assert p["final"] == "versions/v1/final.mp4"
+    assert c.put(f"/api/projects/{pid}/active_version", json={"id": "v9"}).status_code == 404
+
+def test_per_scene_voice_only_that_version(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _done(c, r)
+    c.post(f"/api/projects/{pid}/versions", json={"voice": "Mai Anh"}); wait(r)
+    c.put(f"/api/projects/{pid}/versions/v2/scenes/01", json={"voice": "Thiện Minh"})
+    p = store.load(pid)
+    assert versions.get(p, "v2").scenes["01"].voice == "Thiện Minh"
+    assert versions.get(p, "v2").scenes["01"].status["voice"] == "pending"
+    assert versions.get(p, "v1").scenes["01"].status["voice"] == "done"
+
+def test_new_endpoints_busy_409(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _done(c, r)
+    r.busy = True
+    for method, url, body in [("put", f"/api/projects/{pid}/scenes/01", {"text": "x"}),
+                              ("put", f"/api/projects/{pid}/versions/v1/scenes/01", {"voice": "x"}),
+                              ("post", f"/api/projects/{pid}/versions/v1/scenes/01/rebuild", None),
+                              ("post", f"/api/projects/{pid}/versions/v1/compose", None),
+                              ("post", f"/api/projects/{pid}/versions", {"voice": "x"}),
+                              ("put", f"/api/projects/{pid}/active_version", {"id": "v1"})]:
+        res = getattr(c, method)(url, json=body) if body is not None else getattr(c, method)(url)
+        assert res.status_code == 409, url
+    r.busy = False
+
+def test_listen(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _done(c, r)
+    from studio import voice as voice_mod
+    def fake(text, v, out, tts=None, timeout=None):
+        out.parent.mkdir(parents=True, exist_ok=True); out.write_bytes(b"RIFF"); return []
+    monkeypatch.setattr(voice_mod, "synthesize", fake)
+    res = c.post(f"/api/projects/{pid}/scenes/01/listen", json={"narration": "ây pi ai", "voice": "Hải Đăng"}).json()
+    assert res["url"].startswith(f"/api/projects/{pid}/files/tmp/listen-01.wav")
+    def busy(*a, **k): raise TimeoutError()
+    monkeypatch.setattr(voice_mod, "synthesize", busy)
+    assert c.post(f"/api/projects/{pid}/scenes/01/listen", json={"narration": "a", "voice": "Hải Đăng"}).status_code == 503

@@ -1,20 +1,20 @@
 import asyncio
 import json
-import os
 import re
 import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from . import config, store, versions
+from . import config, store, versions, voice as voice_mod
 from .checks import run_checks
 from .ingest import extract_text
 from .jobs import JOBS, job_alive_elsewhere
 from .llm import build_image_prompt
-from .models import STEPS, Scene, Settings
+from .models import STEPS, Element, Scene, Settings
 
 def reset_stale() -> None:
     """Reset state left over from a crash: running steps -> pending, rendering -> images."""
@@ -30,6 +30,11 @@ def reset_stale() -> None:
                 for k, v in list(s.status.items()):
                     if v == "running":
                         s.status[k] = "pending"; changed = True
+            for v in p.versions:
+                for vs in v.scenes.values():
+                    for k, val in list(vs.status.items()):
+                        if val == "running":
+                            vs.status[k] = "pending"; changed = True
             if p.stage == "rendering":
                 p.stage = "images"; changed = True
             if changed:
@@ -134,7 +139,7 @@ def update_scenes(pid: str, scenes: list[Scene]):
         raise HTTPException(409, "Không thể sửa cảnh lúc này")
     old = {s.id: s for s in p.scenes}
     used: set[str] = set()
-    new, moves = [], {}
+    new, moves, inval = [], {}, []
     for i, inc in enumerate(scenes, 1):
         nid = f"{i:02d}"
         prev = old.get(inc.id) if inc.id not in used else None
@@ -147,35 +152,24 @@ def update_scenes(pid: str, scenes: list[Scene]):
             s = inc.model_copy(update={"id": nid, "status": dict(prev.status), "error": prev.error,
                                        "duration_ms": prev.duration_ms})
             if prev.visual_description != s.visual_description:
-                s.image_prompt = build_image_prompt(s); s.status["image"] = "pending"; s.error = None; versions.invalidate_scene(p, s.id, "image")
+                s.image_prompt = build_image_prompt(s); inval.append((nid, "image"))
             elif prev.elements != s.elements:
-                s.image_prompt = prev.image_prompt if not inc.image_prompt else inc.image_prompt
-                versions.invalidate_scene(p, s.id, "draw")
-            if prev.text != s.text:
-                versions.invalidate_scene(p, s.id, "voice")
+                s.image_prompt = inc.image_prompt or prev.image_prompt; inval.append((nid, "draw"))
+            if versions.narration_of(prev) != versions.narration_of(s):
+                inval.append((nid, "voice"))
+            elif prev.text != s.text:
+                inval.append((nid, "draw"))
             moves[nid] = prev.id
         new.append(s)
-    _move_scene_dirs(pid, set(old), moves)
+    versions.renumber(p, set(old), moves)
     p.scenes = new
+    versions.ensure(p)
+    for nid, step in inval:
+        versions.invalidate_scene(p, nid, step)
     if p.stage == "done":
         p.stage = "images"
-        p.final = None
     store.save(p)
     return p.model_dump()
-
-def _move_scene_dirs(pid, old_ids, moves):
-    base = store.project_dir(pid) / "scenes"
-    if not base.exists():
-        return
-    referenced = set(moves.values())
-    for oid in old_ids - referenced:
-        shutil.rmtree(base / oid, ignore_errors=True)
-    for oid in referenced:
-        if (base / oid).exists():
-            os.replace(base / oid, base / f"_tmp_{oid}")
-    for nid, oid in moves.items():
-        if (base / f"_tmp_{oid}").exists():
-            os.replace(base / f"_tmp_{oid}", base / nid)
 
 @app.put("/api/projects/{pid}/settings")
 def update_settings(pid: str, settings: Settings):
@@ -184,15 +178,21 @@ def update_settings(pid: str, settings: Settings):
     _check_model(settings.text_model, config.TEXT_MODELS); _check_model(settings.image_model, config.IMAGE_MODELS)
     invalidated = False
     if settings.voice != p.settings.voice:
+        v = versions.get(p)
+        v.voice = settings.voice
+        v.label = versions.label_for(int(v.id[1:]), settings.voice)
         for s_ in p.scenes:
-            if s_.status["voice"] == "done": versions.invalidate_scene(p, s_.id, "voice"); invalidated = True
+            if v.scenes[s_.id].status["voice"] == "done":
+                versions.invalidate_scene(p, s_.id, "voice", vid=v.id); invalidated = True
+        v.final = None
     if settings.aspect != p.settings.aspect:
-        for s_ in p.scenes: versions.invalidate_scene(p, s_.id, "image")
+        for s_ in p.scenes:
+            versions.invalidate_scene(p, s_.id, "image")
+        for v in p.versions:
+            v.final = None
         invalidated = True
-    if invalidated:
-        p.final = None
-        if p.stage == "done":
-            p.stage = "images"
+    if invalidated and p.stage == "done":
+        p.stage = "images"
     settings.music_file = p.settings.music_file
     p.settings = settings; store.save(p)
     return p.model_dump()
@@ -238,6 +238,111 @@ def render(pid: str):
     if p.stage not in ("images", "done"):
         raise HTTPException(409, "Không thể thực hiện ở bước này")
     _submit(pid, "render"); return {"ok": True}
+
+def _scene(p, sid):
+    s = next((x for x in p.scenes if x.id == sid), None)
+    if not s:
+        raise HTTPException(404, "Không có cảnh")
+    return s
+
+def _version(p, vid):
+    try:
+        return versions.get(p, vid)
+    except KeyError:
+        raise HTTPException(404, "Không có phiên bản")
+
+class SceneEdit(BaseModel):
+    text: str | None = None
+    narration: str | None = None
+    elements: list[Element] | None = None
+
+@app.put("/api/projects/{pid}/scenes/{sid}")
+def edit_scene(pid: str, sid: str, body: SceneEdit):
+    _busy_check()
+    p = _get(pid); s = _scene(p, sid)
+    before_narr, before_text, before_els = versions.narration_of(s), s.text, list(s.elements)
+    if body.text is not None:
+        s.text = body.text.strip()
+    if body.narration is not None:
+        s.narration = body.narration.strip()
+    if body.elements is not None:
+        s.elements = body.elements
+    if versions.narration_of(s) != before_narr:
+        versions.invalidate_scene(p, sid, "voice")
+    elif s.text != before_text or s.elements != before_els:
+        versions.invalidate_scene(p, sid, "draw")
+    store.save(p)
+    return p.model_dump()
+
+class VoiceOverride(BaseModel):
+    voice: str | None = None
+
+@app.put("/api/projects/{pid}/versions/{vid}/scenes/{sid}")
+def set_scene_voice(pid: str, vid: str, sid: str, body: VoiceOverride):
+    _busy_check()
+    p = _get(pid); _scene(p, sid); v = _version(p, vid)
+    new = (body.voice or "").strip() or None
+    if new == v.voice:
+        new = None
+    if new != v.scenes[sid].voice:
+        v.scenes[sid].voice = new
+        versions.invalidate_scene(p, sid, "voice", vid=vid)
+    store.save(p)
+    return p.model_dump()
+
+@app.post("/api/projects/{pid}/versions/{vid}/scenes/{sid}/rebuild")
+def rebuild_scene(pid: str, vid: str, sid: str):
+    p = _get(pid); _scene(p, sid); _version(p, vid)
+    if p.stage not in ("images", "done"):
+        raise HTTPException(409, "Không thể thực hiện ở bước này")
+    _submit(pid, "rebuild_scene", version=vid, scene=sid); return {"ok": True}
+
+@app.post("/api/projects/{pid}/versions/{vid}/compose")
+def compose_version(pid: str, vid: str):
+    p = _get(pid); _version(p, vid)
+    if p.stage not in ("images", "done"):
+        raise HTTPException(409, "Không thể thực hiện ở bước này")
+    _submit(pid, "compose", version=vid); return {"ok": True}
+
+class NewVersion(BaseModel):
+    voice: str
+
+@app.post("/api/projects/{pid}/versions")
+def new_version(pid: str, body: NewVersion):
+    p = _get(pid)
+    if p.stage not in ("images", "done"):
+        raise HTTPException(409, "Không thể thực hiện ở bước này")
+    if not body.voice.strip():
+        raise HTTPException(400, "Cần chọn giọng")
+    _submit(pid, "new_version", voice=body.voice.strip()); return {"ok": True}
+
+class ActiveVersion(BaseModel):
+    id: str
+
+@app.put("/api/projects/{pid}/active_version")
+def set_active_version(pid: str, body: ActiveVersion):
+    _busy_check()
+    p = _get(pid); _version(p, body.id)
+    p.active_version = body.id; store.save(p)
+    return p.model_dump()
+
+class Listen(BaseModel):
+    narration: str
+    voice: str
+
+@app.post("/api/projects/{pid}/scenes/{sid}/listen")
+def listen(pid: str, sid: str, body: Listen):
+    p = _get(pid); _scene(p, sid)
+    if not body.narration.strip():
+        raise HTTPException(400, "Lời đọc trống")
+    out = store.project_dir(pid) / "tmp" / f"listen-{sid}.wav"
+    try:
+        voice_mod.synthesize(body.narration.strip(), body.voice, out, timeout=60)
+    except TimeoutError:
+        raise HTTPException(503, "Đang bận, thử lại")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Lỗi đọc thử: {e}")
+    return {"url": f"/api/projects/{pid}/files/tmp/listen-{sid}.wav?v={int(time.time() * 1000)}"}
 
 @app.get("/api/projects/{pid}/events")
 async def events(pid: str):
