@@ -222,12 +222,23 @@ def update_settings(pid: str, settings: Settings):
     p.settings = settings; store.save(p)
     return p.model_dump()
 
+class ImagesBatch(BaseModel):
+    image_model: str | None = None   # None = project default
+    all: bool = False                # True = redraw every scene, else only missing/failed ones
+
 @app.post("/api/projects/{pid}/approve/scenes")
-def approve_scenes(pid: str):
+def approve_scenes(pid: str, body: ImagesBatch | None = None):
     p = _get(pid)
-    if p.stage not in ("scenes", "images"):
+    if p.stage not in ("scenes", "images", "done"):
         raise HTTPException(409, "Không thể thực hiện ở bước này")
-    _submit(pid, "images"); return {"ok": True}
+    body = body or ImagesBatch()
+    _check_model(body.image_model, config.IMAGE_MODELS)
+    if p.stage == "done" and not body.all and all(s.status["image"] == "done" for s in p.scenes):
+        raise HTTPException(409, "Không có ảnh nào lỗi hoặc còn thiếu")
+    kw = {"model": body.image_model} if body.image_model else {}
+    if body.all:
+        kw["only"] = [s.id for s in p.scenes]
+    _submit(pid, "images", **kw); return {"ok": True}
 
 class Resegment(BaseModel):
     text_model: str | None = None

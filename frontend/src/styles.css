@@ -261,3 +261,8 @@ td.done { color: var(--ok); font-weight: 600; } td.error { color: var(--err); fo
 .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px var(--line); }
 .swatch.on { box-shadow: 0 0 0 3px var(--blue); }
 .pen-card summary { font-weight: 600; color: var(--ink); }
+
+/* ---------- batch image regenerate ---------- */
+.batch { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; border-left: 4px solid var(--violet); }
+.batch-info { display: flex; flex-direction: column; gap: 2px; margin-right: auto; }
+.batch label { margin: 0; min-width: 260px; flex: 0 1 320px; }

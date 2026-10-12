@@ -9,6 +9,7 @@ type Props = { project: Project; busy: boolean; tick: number; beginAction: () =>
 export default function ImagesReview({ project, busy, tick, beginAction, afterAction, onEditScenes, onRender }: Props) {
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Record<string, string>>({});
+  const [batchModel, setBatchModel] = useState("");
   const models = useModels();
   const modelLabel = (id?: string | null) => models?.image.find((m) => m.id === id)?.label.split(" — ")[0] ?? id;
   const [err, setErr] = useState("");
@@ -28,11 +29,28 @@ export default function ImagesReview({ project, busy, tick, beginAction, afterAc
     try { await f(); after?.(); afterAction(); } catch (e) { setErr(String((e as Error).message)); }
   };
   const allDone = project.scenes.every((s) => s.status.image === "done");
+  const failed = project.scenes.filter((s) => s.status.image === "error" || s.status.image === "pending").length;
+  const model = batchModel || project.settings.image_model;
+  const batch = (all: boolean) => {
+    if (all && !window.confirm(`Tạo lại toàn bộ ${project.scenes.length} ảnh bằng ${modelLabel(model)}? Ảnh hiện tại sẽ bị thay.`)) return;
+    run(() => api.approveScenes(project.id, { image_model: model, all }));
+  };
   return (
     <div>
       <h2>Duyệt ảnh</h2>
       {err && <div className="error">{err}</div>}
       {project.job_error && <div className="error">{project.job_error}</div>}
+      <div className="card batch">
+        <div className="batch-info">
+          <b>Tạo lại ảnh hàng loạt</b>
+          <span className="muted small">{failed ? `${failed} ảnh lỗi hoặc còn thiếu` : "Tất cả ảnh đã có"} · {project.scenes.length} cảnh</span>
+        </div>
+        {models && <ModelSelect label="Model" options={models.image} value={model} onChange={setBatchModel} />}
+        <div className="row">
+          <button disabled={busy || !failed} onClick={() => batch(false)}>Tạo lại {failed || ""} ảnh lỗi/thiếu</button>
+          <button className="primary" disabled={busy} onClick={() => batch(true)}>Tạo lại toàn bộ ảnh</button>
+        </div>
+      </div>
       <div className={`thumbs ${project.settings.aspect === "9:16" ? "portrait" : ""}`}>
         {project.scenes.map((s) => (
           <div className="card" key={s.id}>
@@ -58,7 +76,6 @@ export default function ImagesReview({ project, busy, tick, beginAction, afterAc
       </div>
       <div className="row sticky">
         <button disabled={busy} onClick={onEditScenes}>← Sửa cảnh</button>
-        <button disabled={busy} onClick={() => run(() => api.approveScenes(project.id))}>Tạo các ảnh còn thiếu/lỗi</button>
         <button className="primary" disabled={!allDone || busy} onClick={() => run(() => api.render(project.id), onRender)}>Duyệt → Lồng tiếng & render</button>
       </div>
     </div>

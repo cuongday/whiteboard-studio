@@ -80,9 +80,9 @@ def run_images(pid: str, deps: Deps, only: list[str] | None = None, model: str |
             _fit(out, config.ASPECTS[p.settings.aspect])
             s.image_at = time.time()
         _step(p, s, s.id, "image", work, deps, i, len(todo), "Vẽ ảnh")
-    if only is not None:
-        for s in todo:
-            versions.invalidate_scene(p, s.id, "image")
+    # every scene that gets a new image must be redrawn in all versions
+    for s in todo:
+        versions.invalidate_scene(p, s.id, "image")
     # Gemini calls are network-bound: generate several images at once
     with ThreadPoolExecutor(max_workers=max(1, IMAGE_WORKERS)) as ex:
         list(ex.map(one, range(len(todo)), todo))

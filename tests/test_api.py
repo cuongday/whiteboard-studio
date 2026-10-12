@@ -311,3 +311,29 @@ def test_pen_text_create_preview_and_settings(monkeypatch, tmp_path):
     assert out["settings"]["pen_text"] == "Kênh B" and out["stage"] == "images"
     v = versions.get(store.load(pid))
     assert all(vs.status == {"voice": "done", "draw": "pending"} for vs in v.scenes.values())
+
+def test_regenerate_all_images_with_model(monkeypatch):
+    from tests.test_pipeline import used_models
+    c, r = client(monkeypatch)
+    pid = _flow_to_images(c, r)
+    p = store.load(pid); p.scenes[1].status["image"] = "error"; store.save(p)
+    used_models.clear()
+    assert c.post(f"/api/projects/{pid}/approve/scenes", json={"image_model": "gemini-3-pro-image"}).status_code == 200; wait(r)
+    assert used_models == ["gemini-3-pro-image"]                       # only the failed one
+    used_models.clear()
+    assert c.post(f"/api/projects/{pid}/approve/scenes",
+                  json={"image_model": "gemini-3.1-flash-lite-image", "all": True}).status_code == 200; wait(r)
+    assert used_models == ["gemini-3.1-flash-lite-image"] * 2
+    q = store.load(pid)
+    assert all(s.image_model == "gemini-3.1-flash-lite-image" and s.status["image"] == "done" for s in q.scenes)
+    assert c.post(f"/api/projects/{pid}/approve/scenes", json={"image_model": "nope", "all": True}).status_code == 400
+
+def test_regenerate_all_on_done_project_marks_redraw(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _done(c, r)
+    assert c.post(f"/api/projects/{pid}/approve/scenes").status_code == 409          # nothing missing
+    assert c.post(f"/api/projects/{pid}/approve/scenes", json={"all": True}).status_code == 200; wait(r)
+    q = store.load(pid)
+    assert q.stage == "done"
+    assert all(vs.status == {"voice": "done", "draw": "pending"} and not vs.composed
+               for vs in versions.get(q).scenes.values())
