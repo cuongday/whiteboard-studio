@@ -25,7 +25,31 @@ def test_build_annotation_uses_phrase_times(tmp_path):
     assert ann["sceneDurationMs"] == 6000
     assert len(ann["elements"]) == 2
     starts = [e["reveal"]["startMs"] for e in ann["elements"]]
-    assert starts == [1100, 1900]
+    assert starts[0] == 300 and starts[1] >= 1900                         # first draws at once, second near its phrase
     assert ann["elements"][0]["label"] == "coin"
     last = ann["elements"][-1]["reveal"]
-    assert last["startMs"] + last["durationMs"] <= 6000 - 300
+    assert last["startMs"] + last["durationMs"] == 6000 - 500
+
+from studio.annotate import schedule
+
+def _check_continuous(plan, duration):
+    assert plan[0][0] == 300
+    for (a, da), (b, _) in zip(plan, plan[1:]):
+        assert a + da == b                                              # pen never idles
+    assert plan[-1][0] + plan[-1][1] == duration - 500
+
+def test_schedule_no_idle_gap_scene01():
+    # scene 01: moon anchor 300, next phrases at 5143 / 6240 -> used to idle 3.3-5.1 s
+    plan = schedule([300, 5143, 6240], [512 * 510, 84 * 121, 706 * 208], 8200)
+    _check_continuous(plan, 8200)
+
+def test_schedule_late_first_anchor_starts_at_once():
+    plan = schedule([793, 6710], [1.0, 1.0], 9630)
+    _check_continuous(plan, 9630)
+    assert abs(plan[1][0] - 6710) < 1500 or plan[1][0] < 6710
+
+def test_schedule_close_anchors_keep_min_share_by_size():
+    plan = schedule([None, 2000, 2100, 2200], [4.0, 1.0, 1.0, 1.0], 10000)
+    _check_continuous(plan, 10000)
+    assert plan[0][1] >= 0.5 * 9200 * 4 / 7 - 1                         # big drawing gets its size share
+    assert all(d >= 800 for _, d in plan)
