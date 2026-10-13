@@ -38,7 +38,11 @@ IMAGE_WORKERS = int(os.environ.get("STUDIO_IMAGE_WORKERS", "4"))
 # each whiteboard render is a single-threaded Python/OpenCV loop (~5-8 s per scene after
 # the bounding-box optimisation in vendor/render_stream_whiteboard.py): ~1 core each
 DRAW_WORKERS = int(os.environ.get("STUDIO_DRAW_WORKERS", str(max(1, min(8, (os.cpu_count() or 2) * 3 // 8)))))
-_SAVE_LOCK = threading.Lock()   # steps run on worker threads but share one Project
+# once narration is finished the VieNeu threads are idle: let more scenes draw at once
+DRAW_WORKERS_SOLO = int(os.environ.get("STUDIO_DRAW_WORKERS_SOLO",
+                                       str(max(DRAW_WORKERS, min(12, (os.cpu_count() or 2) * 3 // 4)))))
+_SAVE_LOCK = threading.Lock()
+_LAST_SAVE = [0.0]   # steps run on worker threads but share one Project
 
 def _fit(path, size):
     w, h = size
@@ -64,7 +68,10 @@ def _step(p, holder, sid, step, fn, deps, i, n, label):
     if deps.cancel.is_set():
         return False
     with _SAVE_LOCK:
-        holder.status[step] = "running"; store.save(p)
+        holder.status[step] = "running"
+        # "running" is only for the progress display: skip the write when one just happened
+        if time.monotonic() - _LAST_SAVE[0] > 0.5:
+            store.save(p); _LAST_SAVE[0] = time.monotonic()
     deps.progress(f"{label} cảnh {sid} ({i + 1}/{n})", i / n)
     try:
         fn()
@@ -113,7 +120,11 @@ def _build(p, v, deps, sids: list[str]) -> None:
     n = len(sids)
     order = {sid: i for i, sid in enumerate(sids)}
 
+    slots = threading.Semaphore(max(1, DRAW_WORKERS))
     def draw_scene(s):
+        with slots:
+            _draw_scene(s)
+    def _draw_scene(s):
         vs = v.scenes[s.id]; d = versions.vscene_dir(pid, v.id, s.id)
         def dr():
             if not (d / "narration.json").exists() and (d / "words.json").exists():
@@ -145,7 +156,7 @@ def _build(p, v, deps, sids: list[str]) -> None:
         draws.append(draw_pool.submit(draw_scene, s))
 
     draws: list = []
-    with ThreadPoolExecutor(max_workers=max(1, DRAW_WORKERS)) as draw_pool, \
+    with ThreadPoolExecutor(max_workers=max(1, DRAW_WORKERS, DRAW_WORKERS_SOLO)) as draw_pool, \
          ThreadPoolExecutor(max_workers=max(1, voice.VOICE_WORKERS)) as voice_pool:
         voices = []
         for sid in sids:
@@ -161,6 +172,8 @@ def _build(p, v, deps, sids: list[str]) -> None:
         for f in voices:
             f.result()
         voice_pool.shutdown(wait=True)
+        for _ in range(max(0, DRAW_WORKERS_SOLO - DRAW_WORKERS)):
+            slots.release()
         for f in list(draws):
             f.result()
 

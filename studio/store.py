@@ -42,15 +42,30 @@ def create_project(title: str, settings: Settings, source_text: str) -> Project:
     save(p)
     return p
 
+_LIST_CACHE: dict[str, tuple[int, Project]] = {}
+
 def list_projects() -> list[Project]:
+    """Home page list; a project is only re-parsed when its project.json changed."""
     if not config.PROJECTS_DIR.exists():
         return []
     out = []
+    seen = set()
     for d in config.PROJECTS_DIR.iterdir():
-        if not (d / "project.json").exists():
-            continue
+        f = d / "project.json"
         try:
-            out.append(load(d.name))
+            mt = f.stat().st_mtime_ns
+        except OSError:
+            continue
+        key = str(f); seen.add(key)
+        hit = _LIST_CACHE.get(key)
+        if hit and hit[0] == mt:
+            out.append(hit[1]); continue
+        try:
+            p = load(d.name)
         except Exception:  # noqa: BLE001
             continue
+        _LIST_CACHE[key] = (f.stat().st_mtime_ns, p)
+        out.append(p)
+    for k in set(_LIST_CACHE) - seen:
+        _LIST_CACHE.pop(k, None)
     return sorted(out, key=lambda p: p.created_at, reverse=True)
