@@ -44,6 +44,10 @@ export const api = {
     { method: "PUT", headers: JSONH, body: JSON.stringify(settings) })),
   models: () => j<import("./models").ModelList>(fetch("/api/models")),
   jobs: () => j<JobState>(fetch("/api/jobs")),
+  deleteVersion: (id: string, vid: string) => j<Project>(fetch(`/api/projects/${id}/versions/${vid}`, { method: "DELETE" })),
+  storage: (id: string) => j<{ total: number; cleanable: number }>(fetch(`/api/projects/${id}/storage`)),
+  cleanup: (id: string) => j<{ total: number; cleanable: number }>(fetch(`/api/projects/${id}/cleanup`, { method: "POST" })),
+  srt: (id: string, vid: string) => `/api/projects/${id}/versions/${vid}/subtitles.srt`,
   cancel: (id: string) => j(fetch(`/api/projects/${id}/cancel`, { method: "POST" })),
   render: (id: string) => j(fetch(`/api/projects/${id}/render`, { method: "POST" })),
   editScene: (id: string, sid: string, body: { text?: string; narration?: string; elements?: Element[] }) =>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, JobEvent, JobState, Project } from "./api";
-import Timer from "./Timer";
+import Timer, { fmt } from "./Timer";
 import Stepper from "./Stepper";
 import { pickProgress } from "./progress";
 import { ModelSelect, useModels } from "./models";
@@ -11,6 +11,13 @@ import ImagesReview from "./steps/ImagesReview";
 import ResultView from "./steps/ResultView";
 
 export type EditMode = null | "scenes" | "images";
+
+// remaining time from the average speed so far; hidden until the estimate is meaningful
+const eta = (startedAt: number | null, pct: number) => {
+  if (!startedAt || pct < 0.08 || pct >= 1) return "";
+  const left = (Date.now() / 1000 - startedAt) * (1 - pct) / pct;
+  return ` · còn ~${fmt(left)}`;
+};
 
 export default function App() {
   const [project, setProject] = useState<Project | null>(null);
@@ -120,7 +127,7 @@ export default function App() {
       </div>}
       {bad.length > 0 && <div className="warn">{bad.map((c) => <div key={c.name}>⚠ {c.name}: {c.hint}</div>)}</div>}
       {prog && <div className="progress" role="progressbar" aria-valuenow={Math.round(prog.pct * 100)} aria-valuemin={0} aria-valuemax={100}>
-        <div style={{ width: `${Math.min(100, prog.pct * 100)}%` }} /><span>{prog.msg}</span><b>{Math.round(prog.pct * 100)}%</b>
+        <div style={{ width: `${Math.min(100, prog.pct * 100)}%` }} /><span>{prog.msg}</span><b>{Math.round(prog.pct * 100)}%{eta(job?.started_at ?? null, prog.pct)}</b>
         {job?.busy && job.pid === project?.id && <button className="cancel" disabled={cancelling}
           onClick={() => { setCancelling(true); api.cancel(project!.id).catch((e) => setErr((e as Error).message)); }}>
           {cancelling ? "Đang huỷ…" : "Huỷ"}</button>}

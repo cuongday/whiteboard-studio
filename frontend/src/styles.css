@@ -148,6 +148,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 form > button:last-child { margin-top: 8px; padding: 12px 22px; font-size: 15px; background: var(--blue); border-color: var(--blue); color: #fff; }
 form > button:last-child:hover:not(:disabled) { background: var(--blue-deep); color: #fff; }
 .danger { color: var(--err); } .danger:hover:not(:disabled) { border-color: var(--err); color: var(--err); background: #FFF1F1; }
+button.link { border: 0; background: none; padding: 0; color: var(--blue-deep); text-decoration: underline; cursor: pointer; font: inherit; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ---------- layout helpers ---------- */

@@ -85,9 +85,9 @@ def _explain(log: str) -> str:
 
 def make_preview(clip: Path, wav: Path, out: Path) -> Path:
     """Scene preview for the editor: whiteboard clip + narration, video stream copied (~1 s)."""
-    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(clip), "-i", str(wav),
+    r = proc.run(["ffmpeg", "-v", "error", "-y", "-i", str(clip), "-i", str(wav),
                         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
-                        "-movflags", "+faststart", str(out)], capture_output=True, text=True)
+                        "-movflags", "+faststart", str(out)])
     if r.returncode != 0:
         raise RuntimeError("Lỗi tạo bản xem thử: " + r.stderr[-400:])
     return out

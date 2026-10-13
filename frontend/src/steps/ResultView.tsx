@@ -8,6 +8,8 @@ import ComposerSelect, { Composer } from "../ComposerSelect";
 type Props = { project: Project; busy: boolean; version: number; beginAction: () => void; afterAction: () => void;
   onChange: (p: Project) => void; onEdit: (m: "scenes" | "images") => void };
 
+const mb = (b: number) => `${(b / 1048576).toFixed(b > 1048576 * 100 ? 0 : 1)} MB`;
+
 const badge = (vs?: VersionScene) => {
   if (!vs) return ["pending", "Cần dựng lại"];
   if (vs.status.voice === "error" || vs.status.draw === "error") return ["error", "Lỗi"];
@@ -24,7 +26,9 @@ export default function ResultView({ project, busy, version, beginAction, afterA
   const [composer, setComposer] = useState<Composer | null>(null);
   const [pen, setPen] = useState<{ text: string; color: string } | null>(null);
   const [missing, setMissing] = useState<Record<string, boolean>>({});
+  const [disk, setDisk] = useState<{ total: number; cleanable: number } | null>(null);
   useEffect(() => { api.voices().then(setVoices).catch(() => {}); }, []);
+  useEffect(() => { api.storage(project.id).then(setDisk).catch(() => {}); }, [project.id, version]);
   const v = project.versions.find((x) => x.id === project.active_version) ?? project.versions[0];
   if (!v) return null;
   const run = async (f: () => Promise<unknown>) => {
@@ -65,6 +69,10 @@ export default function ResultView({ project, busy, version, beginAction, afterA
             <a className="primary button" href={api.file(project.id, v.final)} download={`${project.title} - ${v.label}.mp4`}>Tải MP4</a>
             <button disabled={busy} onClick={() => onEdit("scenes")}>Sửa kịch bản / chia cảnh</button>
             <button disabled={busy} onClick={() => onEdit("images")}>Duyệt lại ảnh</button>
+            <a className="button" href={api.srt(project.id, v.id)} download={`${project.title} - ${v.label}.srt`}>Tải phụ đề .srt</a>
+            {project.versions.length > 1 && <button className="danger" disabled={busy} onClick={() => {
+              if (confirm(`Xoá ${v.label} và toàn bộ file của bản này?`)) run(async () => onChange(await api.deleteVersion(project.id, v.id)));
+            }}>Xoá bản này</button>}
           </div>
         </div>
       )}
@@ -82,6 +90,10 @@ export default function ResultView({ project, busy, version, beginAction, afterA
           </div>
         </>}
       </details>
+      {disk && <p className="muted small">Dung lượng dự án: {mb(disk.total)}
+        {disk.cleanable > 0 && <> · <button className="link" disabled={busy}
+          onClick={() => api.cleanup(project.id).then(setDisk).catch((e) => setErr((e as Error).message))}>
+          Dọn {mb(disk.cleanable)} file tạm</button> (ghép lần sau sẽ chậm hơn một chút)</>}</p>}
       <h2>Các cảnh · {v.label}</h2>
       <div className={`thumbs ${project.settings.aspect === "9:16" ? "portrait" : ""}`}>
         {project.scenes.map((s) => {

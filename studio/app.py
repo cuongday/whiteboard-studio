@@ -372,6 +372,61 @@ def set_active_version(pid: str, body: ActiveVersion):
     p.active_version = body.id; store.save(p)
     return p.model_dump()
 
+@app.delete("/api/projects/{pid}/versions/{vid}")
+def delete_version(pid: str, vid: str):
+    _busy_check(pid)
+    p = _get(pid); _version(p, vid)
+    if len(p.versions) <= 1:
+        raise HTTPException(409, "Không thể xoá phiên bản duy nhất")
+    p.versions = [v for v in p.versions if v.id != vid]
+    if p.active_version == vid:
+        p.active_version = p.versions[-1].id
+    store.save(p)
+    shutil.rmtree(versions.vdir(pid, vid), ignore_errors=True)
+    return p.model_dump()
+
+def _dir_size(d: Path) -> int:
+    return sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) if d.exists() else 0
+
+@app.get("/api/projects/{pid}/storage")
+def storage(pid: str):
+    p = _get(pid)
+    base = store.project_dir(pid)
+    return {"total": _dir_size(base), "cleanable": _dir_size(base / "tmp") + sum(
+        f.stat().st_size for f in base.glob("versions/*/scenes/*/segment.mp4"))}
+
+@app.post("/api/projects/{pid}/cleanup")
+def cleanup(pid: str):
+    """Drop files that are rebuilt on demand: listen samples and cached compose segments."""
+    _busy_check(pid)
+    _get(pid)
+    base = store.project_dir(pid)
+    shutil.rmtree(base / "tmp", ignore_errors=True)
+    for f in list(base.glob("versions/*/scenes/*/segment.*")):
+        f.unlink(missing_ok=True)
+    return storage(pid)
+
+def _srt_time(ms: float) -> str:
+    ms = max(0, int(round(ms)))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+
+@app.get("/api/projects/{pid}/versions/{vid}/subtitles.srt")
+def subtitles(pid: str, vid: str):
+    from fastapi.responses import Response
+    from .compose_ffmpeg import _lines
+    p = _get(pid); v = _version(p, vid)
+    cues, offset = [], 0.0
+    for s in p.scenes:
+        vs = v.scenes.get(s.id)
+        f = versions.vscene_dir(pid, vid, s.id) / "words.json"
+        words = json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+        for line in _lines(words, 24 if p.settings.aspect == "9:16" else 42):
+            cues.append((offset + line[0]["start_ms"], offset + line[-1]["end_ms"], " ".join(w["text"] for w in line)))
+        offset += -(-(vs.duration_ms or 0) * config.FPS // 1000) * 1000 / config.FPS if vs else 0
+    body = "\n".join(f"{i}\n{_srt_time(a)} --> {_srt_time(b)}\n{t}\n" for i, (a, b, t) in enumerate(cues, 1))
+    return Response(body, media_type="application/x-subrip",
+                    headers={"Content-Disposition": f'attachment; filename="{vid}.srt"'})
+
 class Listen(BaseModel):
     narration: str
     voice: str

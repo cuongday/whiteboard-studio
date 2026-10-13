@@ -363,3 +363,18 @@ def test_writes_blocked_while_job_runs_and_cancel(monkeypatch):
     gate.set(); wait(r)
     assert c.post(f"/api/projects/{pid}/cancel").status_code == 409
     assert store.load(pid).job_error is None
+
+def test_srt_delete_version_and_cleanup(monkeypatch):
+    c, r = client(monkeypatch)
+    pid = _flow_to_images(c, r)
+    c.post(f"/api/projects/{pid}/render"); wait(r)
+    srt = c.get(f"/api/projects/{pid}/versions/v1/subtitles.srt")
+    assert srt.status_code == 200 and srt.text.startswith("1\n00:00:00,") and "-->" in srt.text
+    assert c.delete(f"/api/projects/{pid}/versions/v1").status_code == 409        # only version
+    c.post(f"/api/projects/{pid}/versions", json={"voice": "Hải Đăng"}); wait(r)
+    out = c.delete(f"/api/projects/{pid}/versions/v1").json()
+    assert [v["id"] for v in out["versions"]] == ["v2"] and out["active_version"] == "v2"
+    assert not versions.vdir(pid, "v1").exists()
+    (store.project_dir(pid) / "tmp").mkdir(exist_ok=True); (store.project_dir(pid) / "tmp" / "x.wav").write_bytes(b"x" * 10)
+    assert c.get(f"/api/projects/{pid}/storage").json()["cleanable"] >= 10
+    assert c.post(f"/api/projects/{pid}/cleanup").json()["cleanable"] == 0

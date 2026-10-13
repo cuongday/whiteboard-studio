@@ -38,6 +38,8 @@ Biến tuỳ chọn khác:
 | `STUDIO_VOICE_WORKERS` | `4` (số bản VieNeu đọc song song, mỗi bản ~1,5 GB RAM) |
 | `STUDIO_DRAW_WORKERS` | 3/8 số nhân CPU, tối đa 8 (số cảnh vẽ song song) |
 | `STUDIO_FFMPEG_PRESET` | `veryfast` (preset x264 khi ghép bằng ffmpeg) |
+| `STUDIO_DRAW_WORKERS_SOLO` | 3/4 số nhân CPU, tối đa 12 (số cảnh vẽ song song sau khi đọc giọng xong) |
+| `STUDIO_SEGMENT_WORKERS` | nửa số nhân, tối đa 4 (số cảnh mã hoá song song khi ghép ffmpeg) |
 | `STUDIO_FFMPEG_CRF` | `20` (chất lượng x264 khi ghép bằng ffmpeg; nhỏ hơn = nét hơn) |
 | `STUDIO_RENDER_CONCURRENCY` | `50%` (số tab Chrome Remotion dùng khi ghép video) |
 | `STUDIO_OFFTHREAD_CACHE_MB` | `1024` (bộ nhớ đệm khung hình của Remotion) |
@@ -107,3 +109,13 @@ Mọi thứ nằm dưới `projects/<id>/`: `project.json`, thư mục từng c�
 ## Ghi công
 
 Mã vẽ tay trong `studio/vendor/` dựa trên [geeklee/srt-whiteboard-animation](https://github.com/geeklee/srt-whiteboard-animation) (MIT) và [vansyson1308/srt-whiteboard-animation](https://github.com/vansyson1308/srt-whiteboard-animation). Giấy phép: `studio/vendor/LICENSE-geeklee`, `studio/vendor/LICENSE-vansyson`.
+
+## Ghi chú vận hành
+
+- **Huỷ tác vụ:** nút "Huỷ" cạnh thanh tiến trình dừng job và kill tiến trình con; cảnh đã xong được giữ.
+- **Khoá khi đang chạy:** mọi thao tác sửa trả 409 khi dự án đang có job, tránh bị job ghi đè.
+- **Ghép ffmpeg tăng dần:** mỗi cảnh mã hoá một lần thành `segment.mp4` (kèm phụ đề); ghép lại chỉ nối
+  bằng `-c copy`. Sửa một cảnh chỉ mã hoá lại cảnh đó. "Dọn file tạm" xoá các segment này.
+- **Cache ảnh Gemini:** `.cache/images/` theo (prompt, model, tỉ lệ); bấm "Tạo lại" luôn gọi Gemini mới.
+- **Phụ đề rời:** "Tải phụ đề .srt" trên màn hình kết quả.
+- Server chỉ nghe `127.0.0.1` (không có đăng nhập).
