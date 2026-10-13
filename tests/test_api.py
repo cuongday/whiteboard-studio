@@ -347,3 +347,19 @@ def test_compose_engine_choice(monkeypatch):
     assert c.post(f"/api/projects/{pid}/versions/v1/compose", json={"composer": "ffmpeg"}).status_code == 200; wait(r)
     assert store.load(pid).settings.composer == "ffmpeg"
     assert c.post(f"/api/projects/{pid}/versions/v1/compose", json={"composer": "bogus"}).status_code == 422
+
+def test_writes_blocked_while_job_runs_and_cancel(monkeypatch):
+    import threading
+    from studio import pipeline
+    c, r = client(monkeypatch)
+    pid = _flow_to_images(c, r)
+    gate = threading.Event()
+    monkeypatch.setattr(pipeline, "run_render", lambda pid, deps, **kw: (gate.wait(5), pipeline.check_cancel(deps)))
+    assert c.post(f"/api/projects/{pid}/render").status_code == 200
+    st = c.get(f"/api/projects/{pid}").json()["settings"]
+    assert c.put(f"/api/projects/{pid}/settings", json=st).status_code == 409
+    assert c.put(f"/api/projects/{pid}/scenes/01", json={"text": "x"}).status_code == 409
+    assert c.post(f"/api/projects/{pid}/cancel").status_code == 200
+    gate.set(); wait(r)
+    assert c.post(f"/api/projects/{pid}/cancel").status_code == 409
+    assert store.load(pid).job_error is None

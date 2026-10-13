@@ -8,7 +8,7 @@ export type Project = { id: string; title: string; created_at: string; settings:
   stage: "input" | "scenes" | "images" | "rendering" | "done"; scenes: Scene[]; final: string | null; job_error: string | null; timings?: Record<string, number>;
   versions: Version[]; active_version: string };
 export type JobState = { busy: boolean; pid: string | null; kind: string | null; started_at: number | null; progress: JobEvent | null };
-export type JobEvent = { pid: string; type: "progress" | "done" | "error"; msg: string; pct: number };
+export type JobEvent = { pid: string; type: "progress" | "done" | "error" | "cancelled"; msg: string; pct: number };
 
 const JSONH = { "Content-Type": "application/json" };
 
@@ -44,6 +44,7 @@ export const api = {
     { method: "PUT", headers: JSONH, body: JSON.stringify(settings) })),
   models: () => j<import("./models").ModelList>(fetch("/api/models")),
   jobs: () => j<JobState>(fetch("/api/jobs")),
+  cancel: (id: string) => j(fetch(`/api/projects/${id}/cancel`, { method: "POST" })),
   render: (id: string) => j(fetch(`/api/projects/${id}/render`, { method: "POST" })),
   editScene: (id: string, sid: string, body: { text?: string; narration?: string; elements?: Element[] }) =>
     j<Project>(fetch(`/api/projects/${id}/scenes/${sid}`, { method: "PUT", headers: JSONH, body: JSON.stringify(body) })),

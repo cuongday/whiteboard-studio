@@ -216,3 +216,29 @@ def test_draw_uses_pen_text_hand(tmp_path, monkeypatch):
     d = deps(); hands.clear()
     pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
     assert len(hands) == 2 and hands[0] == hands[1] and hands[0] != hand_mod.CLEAN_HAND
+
+def test_failed_regen_keeps_built_scene():
+    p = store.create_project("t", Settings(aspect="16:9"), "x")
+    d = deps()
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
+    def bad_image(prompt, aspect, out, model=None): raise RuntimeError("quota")
+    d.gen_image = bad_image
+    pipeline.run_images(p.id, d, only=["01"])
+    q = store.load(p.id); vs = versions.get(q).scenes["01"]
+    assert q.scenes[0].status["image"] == "error"
+    assert vs.status == {"voice": "done", "draw": "done"} and vs.composed       # old clip still valid
+    assert (store.scene_dir(p.id, "01") / "image.png").exists()
+
+def test_cancel_stops_render_and_restores_stage():
+    import pytest
+    p = store.create_project("t", Settings(aspect="16:9"), "x")
+    d = deps()
+    pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d)
+    def synth_then_cancel(text, voice, out_wav):
+        d.cancel.set(); return fake_synth(text, voice, out_wav)
+    d.synth = synth_then_cancel
+    with pytest.raises(pipeline.Cancelled):
+        pipeline.run_render(p.id, d)
+    q = store.load(p.id)
+    assert q.stage == "images" and q.final is None and q.job_error is None
+    assert all(vs.status["draw"] != "running" for vs in versions.get(q).scenes.values())

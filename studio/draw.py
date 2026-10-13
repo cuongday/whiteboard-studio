@@ -1,9 +1,9 @@
 import json
 
 import cv2
-import subprocess
 import sys
 from pathlib import Path
+from . import proc
 
 RENDERER = Path(__file__).resolve().parent / "vendor" / "render_stream_whiteboard.py"
 
@@ -25,7 +25,7 @@ def render_clip(image: Path, annotation: dict, out: Path, fps: int = 30, hand: P
     cmd = [sys.executable, str(RENDERER), str(image), str(ann_path), str(out), str(hand),
            "--fps", str(fps), "--total-ms", str(annotation["sceneDurationMs"]),
            "--cap-long-edge", str(max(h, w))]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = proc.run(cmd)
     if r.returncode != 0 or not out.exists():
         raise RuntimeError("Lỗi vẽ cảnh: " + (r.stderr or r.stdout)[-800:])
     return out

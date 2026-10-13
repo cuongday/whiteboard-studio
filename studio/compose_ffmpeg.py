@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import config, store, versions
+from . import config, proc as procs, store, versions
 from .models import Project
 
 FONT_DIR = Path(__file__).resolve().parent / "vendor" / "fonts"
@@ -150,13 +150,14 @@ def render_final(p: Project, vid: str, on_progress=None) -> Path:
                "-c:v", "libx264", "-preset", PRESET, "-crf", CRF, "-pix_fmt", "yuv420p", "-r", str(fps),
                "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
                "-progress", "pipe:1", "-nostats", str(tmp_out)]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = procs.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         for line in proc.stdout:
             m = _TIME.match(line.strip())
             if on_progress and m and total_ms:
                 on_progress(min(1.0, int(m.group(1)) / 1000 / total_ms))
         err = proc.stderr.read()
-        if proc.wait() != 0 or not tmp_out.exists():
+        rc = proc.wait(); procs.done(proc)
+        if rc != 0 or not tmp_out.exists():
             tmp_out.unlink(missing_ok=True)
             raise RuntimeError("ffmpeg lỗi khi ghép video:\n" + err[-1200:])
     os.replace(tmp_out, out)

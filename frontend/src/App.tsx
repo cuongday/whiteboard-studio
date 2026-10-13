@@ -15,6 +15,7 @@ export type EditMode = null | "scenes" | "images";
 export default function App() {
   const [project, setProject] = useState<Project | null>(null);
   const [list, setList] = useState<Project[]>([]);
+  const [cancelling, setCancelling] = useState(false);
   const [ev, setEv] = useState<JobEvent | null>(null);
   const [checks, setChecks] = useState<{ name: string; ok: boolean; hint: string }[]>([]);
   const [edit, setEdit] = useState<EditMode>(null);
@@ -61,7 +62,7 @@ export default function App() {
   const pid = project?.id;
   useEffect(() => {
     if (!pid) return;
-    return api.events(pid, (e) => { setEv(e); if (e.type !== "progress") reload(); }, reload);
+    return api.events(pid, (e) => { setEv(e); if (e.type !== "progress") { setCancelling(false); reload(); } }, reload);
   }, [pid, reload]);
 
   // poll while this project's job runs (or segmentation is pending)
@@ -120,7 +121,11 @@ export default function App() {
       {bad.length > 0 && <div className="warn">{bad.map((c) => <div key={c.name}>⚠ {c.name}: {c.hint}</div>)}</div>}
       {prog && <div className="progress" role="progressbar" aria-valuenow={Math.round(prog.pct * 100)} aria-valuemin={0} aria-valuemax={100}>
         <div style={{ width: `${Math.min(100, prog.pct * 100)}%` }} /><span>{prog.msg}</span><b>{Math.round(prog.pct * 100)}%</b>
+        {job?.busy && job.pid === project?.id && <button className="cancel" disabled={cancelling}
+          onClick={() => { setCancelling(true); api.cancel(project!.id).catch((e) => setErr((e as Error).message)); }}>
+          {cancelling ? "Đang huỷ…" : "Huỷ"}</button>}
       </div>}
+      {ev && ev.type === "cancelled" && <div className="warn">Đã huỷ tác vụ. Các cảnh xong trước đó được giữ lại.</div>}
       {ev && ev.type === "error" && <div className="error">Lỗi: {ev.msg}</div>}
       {err && <div className="error">{err}</div>}
       {!project && <NewProject list={list} onCreated={open} onOpen={openById} />}

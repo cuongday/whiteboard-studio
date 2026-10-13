@@ -25,6 +25,14 @@ class Deps:
     render: Callable = compose.render_final
     preview: Callable = compose.make_preview
     progress: Callable[[str, float], None] = field(default=lambda msg, pct: None)
+    cancel: threading.Event = field(default_factory=threading.Event)
+
+class Cancelled(Exception):
+    pass
+
+def check_cancel(deps) -> None:
+    if deps.cancel.is_set():
+        raise Cancelled("Đã huỷ tác vụ")
 
 IMAGE_WORKERS = int(os.environ.get("STUDIO_IMAGE_WORKERS", "4"))
 # each whiteboard render is a single-threaded Python/OpenCV loop (~5-8 s per scene after
@@ -53,6 +61,8 @@ def run_segment(pid: str, deps: Deps) -> None:
     store.save(p)
 
 def _step(p, holder, sid, step, fn, deps, i, n, label):
+    if deps.cancel.is_set():
+        return False
     with _SAVE_LOCK:
         holder.status[step] = "running"; store.save(p)
     deps.progress(f"{label} cảnh {sid} ({i + 1}/{n})", i / n)
@@ -62,7 +72,10 @@ def _step(p, holder, sid, step, fn, deps, i, n, label):
     except Exception as e:  # noqa: BLE001 — isolate per-scene failures
         ok, err = False, f"{step}: {e}"
     with _SAVE_LOCK:
-        holder.status[step] = "done" if ok else "error"; holder.error = err
+        if not ok and deps.cancel.is_set():
+            holder.status[step] = "pending"; holder.error = None   # killed by a cancel, not a real failure
+        else:
+            holder.status[step] = "done" if ok else "error"; holder.error = err
         if hasattr(holder, "composed"):
             holder.composed = False
         store.save(p)
@@ -75,17 +88,20 @@ def run_images(pid: str, deps: Deps, only: list[str] | None = None, model: str |
         out = store.scene_dir(pid, s.id) / "image.png"
         def work():
             used = model or p.settings.image_model
-            deps.gen_image(s.image_prompt, p.settings.aspect, out, model=used)
+            tmp = out.with_name("image.new.png")
+            deps.gen_image(s.image_prompt, p.settings.aspect, tmp, model=used)
+            _fit(tmp, config.ASPECTS[p.settings.aspect])
+            os.replace(tmp, out)
             s.image_model = used
-            _fit(out, config.ASPECTS[p.settings.aspect])
             s.image_at = time.time()
+            # only a scene that really got a new image must be redrawn in all versions
+            with _SAVE_LOCK:
+                versions.invalidate_scene(p, s.id, "image")
         _step(p, s, s.id, "image", work, deps, i, len(todo), "Vẽ ảnh")
-    # every scene that gets a new image must be redrawn in all versions
-    for s in todo:
-        versions.invalidate_scene(p, s.id, "image")
     # Gemini calls are network-bound: generate several images at once
     with ThreadPoolExecutor(max_workers=max(1, IMAGE_WORKERS)) as ex:
         list(ex.map(one, range(len(todo)), todo))
+    check_cancel(deps)
     if p.stage != "done":
         p.stage = "images"
     store.save(p)
@@ -171,6 +187,9 @@ def _build_and_compose(p, v, deps) -> None:
         p.stage = "rendering"
     store.save(p)
     _build(p, v, deps, [s.id for s in p.scenes])
+    if deps.cancel.is_set():
+        p.stage = "done" if any(x.final for x in p.versions) else "images"; store.save(p)
+        check_cancel(deps)
     if not _all_built(v):
         p.stage = "done" if any(x.final for x in p.versions) else "images"
         p.job_error = "Một số cảnh lỗi, hãy xem và thử lại"; store.save(p)
@@ -193,6 +212,7 @@ def run_rebuild_scene(pid: str, deps: Deps, version: str, scene: str) -> None:
         vs.status["draw"] = "pending"          # explicit rebuild = redraw
     store.save(p)
     _build(p, v, deps, [scene])
+    check_cancel(deps)
     if vs.status["draw"] != "done":
         p.job_error = vs.error or "Dựng lại cảnh thất bại"; store.save(p)
         raise RuntimeError(p.job_error)

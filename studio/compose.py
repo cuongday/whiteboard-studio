@@ -4,7 +4,7 @@ import math
 import re
 import subprocess
 from pathlib import Path
-from . import config, store, versions
+from . import config, proc, store, versions
 from .models import Project
 
 def build_props(p: Project, vid: str) -> dict:
@@ -59,14 +59,17 @@ def render_remotion(p: Project, vid: str, on_progress=None) -> Path:
     raise AssertionError("unreachable")
 
 def _run_remotion(cmd, on_progress) -> tuple[bool, list[str]]:
-    proc = subprocess.Popen(cmd, cwd=config.COMPOSER_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    pr = proc.popen(cmd, cwd=config.COMPOSER_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     tail: list[str] = []
-    for line in proc.stdout:
+    for line in pr.stdout:
         tail = (tail + [line])[-40:]
         m = _PROG.search(line)
         if on_progress and m and "Rendered" in line:
             on_progress(int(m.group(1)) / max(1, int(m.group(2))))
-    return proc.wait() == 0, tail
+    try:
+        return pr.wait() == 0, tail
+    finally:
+        proc.done(pr)
 
 def _summarize(tail: list[str]) -> str:
     """Drop the repetitive "Rendered x/y" progress spam so the real error is readable."""

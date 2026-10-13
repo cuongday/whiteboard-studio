@@ -2,7 +2,7 @@ import os
 import queue
 import threading
 import time
-from . import pipeline, store
+from . import pipeline, proc, store
 
 class JobRunner:
     def __init__(self, deps_factory=pipeline.Deps):
@@ -14,6 +14,7 @@ class JobRunner:
         self.started_at: float | None = None
         self.last_progress: dict | None = None
         self.deps_factory = deps_factory
+        self._cancel = threading.Event()
 
     def subscribe(self) -> queue.Queue:
         q = queue.Queue(); self._subs.append(q); return q
@@ -32,11 +33,20 @@ class JobRunner:
             self.kind = kind
             self.started_at = time.time()
             self.last_progress = None
+            self._cancel = threading.Event()
         try:
             threading.Thread(target=self._run, args=(pid, kind, kw), daemon=True).start()
         except BaseException:
             self.busy = False; self.pid = None
             raise
+        return True
+
+    def cancel(self, pid: str) -> bool:
+        """Stop the running job of project pid: no new steps start, child processes are killed."""
+        if not self.busy or self.pid != pid:
+            return False
+        self._cancel.set()
+        proc.kill_all()
         return True
 
     def _run(self, pid, kind, kw):
@@ -53,17 +63,27 @@ class JobRunner:
                 self.last_progress = ev
                 self.emit(ev)
             deps.progress = progress
+            deps.cancel = self._cancel
             fn = {"segment": pipeline.run_segment, "images": pipeline.run_images, "render": pipeline.run_render,
                   "compose": pipeline.run_compose, "rebuild_scene": pipeline.run_rebuild_scene,
                   "new_version": pipeline.run_new_version}[kind]
             fn(pid, deps, **kw)
             ev = {"pid": pid, "type": "done", "msg": kind, "pct": 1}
-        except Exception as e:  # noqa: BLE001
+        except pipeline.Cancelled:
             try:
-                p = store.load(pid); p.job_error = str(e); store.save(p)
+                p = store.load(pid); p.job_error = None; store.save(p)
             except Exception:  # noqa: BLE001
                 pass
-            ev = {"pid": pid, "type": "error", "msg": str(e), "pct": 0}
+            ev = {"pid": pid, "type": "cancelled", "msg": kind, "pct": 0}
+        except Exception as e:  # noqa: BLE001
+            if self._cancel.is_set():
+                e = pipeline.Cancelled("Đã huỷ tác vụ")
+            try:
+                p = store.load(pid); p.job_error = None if isinstance(e, pipeline.Cancelled) else str(e); store.save(p)
+            except Exception:  # noqa: BLE001
+                pass
+            ev = {"pid": pid, "type": "cancelled" if isinstance(e, pipeline.Cancelled) else "error",
+                  "msg": str(e), "pct": 0}
         finally:
             lock.unlink(missing_ok=True)
             self._record_time(pid, kind)

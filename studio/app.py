@@ -53,8 +53,9 @@ app = FastAPI(title="Whiteboard Studio", lifespan=lifespan)
 
 _PID_RE = re.compile(r"^[a-f0-9]{10}$")
 
-def _busy_check():
-    if JOBS.busy:
+def _busy_check(pid: str | None = None):
+    # a write while a job runs would be overwritten when the job saves its own copy of the project
+    if JOBS.busy or (pid and job_alive_elsewhere(store.project_dir(pid))):
         raise HTTPException(409, "Đang có tác vụ khác chạy")
 
 def _get(pid):
@@ -66,6 +67,7 @@ def _get(pid):
         raise HTTPException(404, "Không tìm thấy dự án")
 
 def _submit(pid, kind, **kw):
+    _busy_check(pid)
     if not JOBS.submit(pid, kind, **kw):
         raise HTTPException(409, "Đang có tác vụ khác chạy")
 
@@ -150,7 +152,7 @@ async def create(title: str = Form(""), text: str = Form(""), aspect: str = Form
 
 @app.put("/api/projects/{pid}/scenes")
 def update_scenes(pid: str, scenes: list[Scene]):
-    _busy_check()
+    _busy_check(pid)
     p = _get(pid)
     if p.stage not in ("scenes", "images", "done"):
         raise HTTPException(409, "Không thể sửa cảnh lúc này")
@@ -191,7 +193,7 @@ def update_scenes(pid: str, scenes: list[Scene]):
 
 @app.put("/api/projects/{pid}/settings")
 def update_settings(pid: str, settings: Settings):
-    _busy_check()
+    _busy_check(pid)
     p = _get(pid)
     _check_model(settings.text_model, config.TEXT_MODELS); _check_model(settings.image_model, config.IMAGE_MODELS)
     invalidated = False
@@ -253,7 +255,7 @@ def resegment(pid: str, body: Resegment | None = None):
     p = _get(pid)
     if p.stage not in ("input", "scenes"):
         raise HTTPException(409, "Không thể thực hiện ở bước này")
-    _busy_check()
+    _busy_check(pid)
     if body and body.text_model:
         _check_model(body.text_model, config.TEXT_MODELS); p.settings.text_model = body.text_model
     p.job_error = None; store.save(p)
@@ -266,7 +268,7 @@ class Regen(BaseModel):
 @app.post("/api/projects/{pid}/scenes/{sid}/regenerate")
 def regenerate(pid: str, sid: str, body: Regen):
     p = _get(pid)
-    _busy_check()
+    _busy_check(pid)
     s = next((x for x in p.scenes if x.id == sid), None)
     if not s: raise HTTPException(404, "Không có cảnh")
     _check_model(body.image_model, config.IMAGE_MODELS)
@@ -299,7 +301,7 @@ class SceneEdit(BaseModel):
 
 @app.put("/api/projects/{pid}/scenes/{sid}")
 def edit_scene(pid: str, sid: str, body: SceneEdit):
-    _busy_check()
+    _busy_check(pid)
     p = _get(pid); s = _scene(p, sid)
     before_narr, before_text, before_els = versions.narration_of(s), s.text, list(s.elements)
     if body.text is not None:
@@ -320,7 +322,7 @@ class VoiceOverride(BaseModel):
 
 @app.put("/api/projects/{pid}/versions/{vid}/scenes/{sid}")
 def set_scene_voice(pid: str, vid: str, sid: str, body: VoiceOverride):
-    _busy_check()
+    _busy_check(pid)
     p = _get(pid); _scene(p, sid); v = _version(p, vid)
     new = (body.voice or "").strip() or None
     if new == v.voice:
@@ -343,7 +345,7 @@ def compose_version(pid: str, vid: str, body: ComposeBody | None = None):
     p = _get(pid); _version(p, vid)
     if p.stage not in ("images", "done"):
         raise HTTPException(409, "Không thể thực hiện ở bước này")
-    _busy_check()
+    _busy_check(pid)
     if body and body.composer and body.composer != p.settings.composer:
         p.settings.composer = body.composer; store.save(p)
     _submit(pid, "compose", version=vid); return {"ok": True}
@@ -365,7 +367,7 @@ class ActiveVersion(BaseModel):
 
 @app.put("/api/projects/{pid}/active_version")
 def set_active_version(pid: str, body: ActiveVersion):
-    _busy_check()
+    _busy_check(pid)
     p = _get(pid); _version(p, body.id)
     p.active_version = body.id; store.save(p)
     return p.model_dump()
@@ -387,6 +389,13 @@ def listen(pid: str, sid: str, body: Listen):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Lỗi đọc thử: {e}")
     return {"url": f"/api/projects/{pid}/files/tmp/listen-{sid}.wav?v={int(time.time() * 1000)}"}
+
+@app.post("/api/projects/{pid}/cancel")
+def cancel_job(pid: str):
+    _get(pid)
+    if not JOBS.cancel(pid):
+        raise HTTPException(409, "Không có tác vụ nào đang chạy cho dự án này")
+    return {"ok": True}
 
 @app.get("/api/projects/{pid}/events")
 async def events(pid: str):
