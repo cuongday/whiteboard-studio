@@ -36,10 +36,13 @@ def _ass_time(ms: float) -> str:
 def _ass_escape(t: str) -> str:
     return t.replace("\\", "\\\\").replace("{", "(").replace("}", ")").replace("\n", " ")
 
-def _lines(words: list[dict]) -> list[list[dict]]:
-    """Max 7 words per caption line, break after sentence punctuation (as Captions.tsx)."""
+def _lines(words: list[dict], max_chars: int = 42) -> list[list[dict]]:
+    """Max 7 words / max_chars per caption line (one row on screen), break after sentence
+    punctuation (as Captions.tsx)."""
     out, cur = [], []
     for w in words:
+        if cur and len(" ".join(x["text"] for x in cur + [w])) > max_chars:
+            out.append(cur); cur = []
         cur.append(w)
         if len(cur) >= 7 or re.search(r"[.!?…]$", w["text"]):
             out.append(cur); cur = []
@@ -71,7 +74,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events = []
     for offset, words in scenes:
-        lines = _lines(words)
+        lines = _lines(words, 24 if portrait else 42)
         for li, line in enumerate(lines):
             start = offset + line[0]["start_ms"] - 100
             end = offset + line[-1]["end_ms"] + 300

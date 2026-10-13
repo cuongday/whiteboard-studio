@@ -10,7 +10,7 @@ def fake_segment(text, aspect, model=None):
     return [Scene(id="01", text="Giá tăng.", visual_description="x", elements=[Element(label="a", say="tăng")], image_prompt="p1"),
             Scene(id="02", text="Tiền giảm.", visual_description="y", elements=[Element(label="b", say="giảm")], image_prompt="p2")]
 
-def fake_image(prompt, aspect, out, model=None):
+def fake_image(prompt, aspect, out, model=None, fresh=False):
     used_models.append(model)
     cv2.imwrite(str(out), np.full((100, 200, 3), 230, np.uint8)); return out
 
@@ -61,7 +61,7 @@ def test_scene_error_isolated():
     p = store.create_project("t", Settings(), "x")
     d = deps()
     pipeline.run_segment(p.id, d)
-    def bad_image(prompt, aspect, out, model=None):
+    def bad_image(prompt, aspect, out, model=None, fresh=False):
         if prompt == "p2": raise RuntimeError("boom")
         return fake_image(prompt, aspect, out, model)
     d.gen_image = bad_image
@@ -221,7 +221,7 @@ def test_failed_regen_keeps_built_scene():
     p = store.create_project("t", Settings(aspect="16:9"), "x")
     d = deps()
     pipeline.run_segment(p.id, d); pipeline.run_images(p.id, d); pipeline.run_render(p.id, d)
-    def bad_image(prompt, aspect, out, model=None): raise RuntimeError("quota")
+    def bad_image(prompt, aspect, out, model=None, fresh=False): raise RuntimeError("quota")
     d.gen_image = bad_image
     pipeline.run_images(p.id, d, only=["01"])
     q = store.load(p.id); vs = versions.get(q).scenes["01"]

@@ -96,7 +96,8 @@ def run_images(pid: str, deps: Deps, only: list[str] | None = None, model: str |
         def work():
             used = model or p.settings.image_model
             tmp = out.with_name("image.new.png")
-            deps.gen_image(s.image_prompt, p.settings.aspect, tmp, model=used)
+            # an explicit regenerate wants a new picture; the first pass may reuse the image cache
+            deps.gen_image(s.image_prompt, p.settings.aspect, tmp, model=used, fresh=only is not None)
             _fit(tmp, config.ASPECTS[p.settings.aspect])
             os.replace(tmp, out)
             s.image_model = used

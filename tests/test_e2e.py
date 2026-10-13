@@ -15,7 +15,7 @@ def seg(text, aspect, model=None):
             Element(label="b", say=t.split()[-1].strip("."))], image_prompt="p") for i, t in enumerate(["Giá cả tăng nhanh.", "Tiền mất giá."], 1)]
 
 
-def img(prompt, aspect, out, model=None):
+def img(prompt, aspect, out, model=None, fresh=False):
     make_scene(out)
     return out
 

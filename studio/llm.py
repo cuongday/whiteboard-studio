@@ -1,3 +1,5 @@
+import hashlib
+import shutil
 import json
 import time
 from functools import lru_cache
@@ -89,11 +91,28 @@ def segment_script(text: str, aspect: str, client=None, model: str | None = None
             last = e
     raise LLMError(f"Gemini trả về dữ liệu chia cảnh không hợp lệ: {last}")
 
-def generate_image(prompt: str, aspect: str, out: Path, client=None, model: str | None = None) -> Path:
+IMAGE_CACHE = config.ROOT / ".cache" / "images"
+
+def generate_image(prompt: str, aspect: str, out: Path, client=None, model: str | None = None,
+                   fresh: bool = False) -> Path:
+    """fresh=False reuses an earlier image of the same (prompt, model, aspect) instead of paying again."""
+    model = model or config.IMAGE_MODEL
+    key = hashlib.sha256(json.dumps([prompt, model, aspect]).encode()).hexdigest()[:24]
+    cached = IMAGE_CACHE / f"{key}.png"
+    if not fresh and cached.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(cached, out)
+        return out
+    _generate_image(prompt, aspect, out, client, model)
+    IMAGE_CACHE.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(out, cached)
+    return out
+
+def _generate_image(prompt: str, aspect: str, out: Path, client, model: str) -> Path:
     client = client or get_client()
     cfg = types.GenerateContentConfig(response_modalities=["IMAGE"],
                                       image_config=types.ImageConfig(aspect_ratio=aspect))
-    resp = _call(client, model=model or config.IMAGE_MODEL, contents=prompt, config=cfg)
+    resp = _call(client, model=model, contents=prompt, config=cfg)
     for cand in resp.candidates or []:
         for part in (cand.content.parts if cand.content else []) or []:
             if getattr(part, "inline_data", None) and part.inline_data.data:

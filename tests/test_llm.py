@@ -45,3 +45,13 @@ def test_generate_image_writes_png(tmp_path):
     out = llm.generate_image("p", "9:16", tmp_path / "image.png", client=fake)
     assert out.read_bytes() == b"\x89PNGfake"
     assert fake.models.calls[0][2].image_config.aspect_ratio == "9:16"
+
+def test_generate_image_cache_and_fresh(tmp_path):
+    part = SimpleNamespace(inline_data=SimpleNamespace(data=b"\x89PNGfake", mime_type="image/png"), text=None)
+    resp = SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[part]))])
+    fake = SimpleNamespace(models=FakeModels([resp, resp]))
+    llm.generate_image("p", "16:9", tmp_path / "a.png", client=fake, model="m")
+    llm.generate_image("p", "16:9", tmp_path / "b.png", client=fake, model="m")
+    assert len(fake.models.calls) == 1 and (tmp_path / "b.png").read_bytes() == b"\x89PNGfake"
+    llm.generate_image("p", "16:9", tmp_path / "c.png", client=fake, model="m", fresh=True)
+    assert len(fake.models.calls) == 2

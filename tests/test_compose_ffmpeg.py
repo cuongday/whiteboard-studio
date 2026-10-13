@@ -84,3 +84,8 @@ def test_incremental_reuses_unchanged_segments():
     out = compose_ffmpeg.render_final(store.load(p.id), "v1")
     assert seg1.stat().st_mtime_ns == m1 and seg2.stat().st_mtime_ns != m2
     assert abs(float(_probe(out)["format"]["duration"]) - 2.5) < 0.1
+
+def test_portrait_lines_fit_one_row():
+    words = [{"text": t, "start_ms": i * 300, "end_ms": i * 300 + 250}
+             for i, t in enumerate("Nghiên cứu chuyên nghiệp thường xuyên khuyến khích người tiêu dùng".split())]
+    assert all(len(" ".join(w["text"] for w in l)) <= 24 for l in compose_ffmpeg._lines(words, 24))
