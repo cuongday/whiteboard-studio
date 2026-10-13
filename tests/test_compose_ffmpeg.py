@@ -73,3 +73,14 @@ def test_caption_lines_never_overlap():
     assert len(spans) == 4
     for (a0, a1), (b0, _) in zip(spans, spans[1:]):
         assert a1 <= b0 and a0 < a1
+
+def test_incremental_reuses_unchanged_segments():
+    p = _project()
+    compose_ffmpeg.render_final(p, "v1")
+    seg1 = versions.vscene_dir(p.id, "v1", "01") / "segment.mp4"
+    seg2 = versions.vscene_dir(p.id, "v1", "02") / "segment.mp4"
+    m1, m2 = seg1.stat().st_mtime_ns, seg2.stat().st_mtime_ns
+    _clip(versions.vscene_dir(p.id, "v1", "02") / "clip.mp4", 1.0, color="black")   # scene 02 redrawn
+    out = compose_ffmpeg.render_final(store.load(p.id), "v1")
+    assert seg1.stat().st_mtime_ns == m1 and seg2.stat().st_mtime_ns != m2
+    assert abs(float(_probe(out)["format"]["duration"]) - 2.5) < 0.1

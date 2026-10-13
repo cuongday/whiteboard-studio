@@ -10,7 +10,11 @@ import os
 import re
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import numpy as np
+import soundfile as sf
 
 from . import config, proc as procs, store, versions
 from .models import Project
@@ -96,8 +100,62 @@ def _duck_expr(spans_ms: list[tuple[float, float]]) -> str:
     return f"if(gt({cond},0),{DUCKED_VOL},{MUSIC_VOL})"
 
 _TIME = re.compile(r"out_time_ms=(\d+)")
+SEG_WORKERS = int(os.environ.get("STUDIO_SEGMENT_WORKERS", str(max(1, min(4, (os.cpu_count() or 2) // 2)))))
+
+def _run(cmd, total_s: float | None = None, on_progress=None) -> None:
+    proc = procs.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        for line in proc.stdout:
+            m = _TIME.match(line.strip())
+            if on_progress and m and total_s:
+                on_progress(min(1.0, int(m.group(1)) / 1e6 / total_s))
+        err = proc.stderr.read()
+        rc = proc.wait()
+    finally:
+        procs.done(proc)
+    if rc != 0:
+        raise RuntimeError("ffmpeg lỗi khi ghép video:\n" + err[-1200:])
+
+def _segment(d: Path, frames: int, fps: int, w: int, h: int, words: list[dict], captions: bool) -> Path:
+    """Scene clip -> captioned, exact-length H.264 segment; cached until clip/words/format change."""
+    seg = d / "segment.mp4"
+    key = json.dumps({"clip": (d / "clip.mp4").stat().st_mtime_ns, "frames": frames, "fps": fps, "size": [w, h],
+                      "captions": captions, "words": words if captions else None, "preset": PRESET, "crf": CRF},
+                     ensure_ascii=False, sort_keys=True)
+    kf = d / "segment.key"
+    if seg.exists() and kf.exists() and kf.read_text(encoding="utf-8") == key:
+        return seg
+    dur = frames / fps
+    vf = (f"fps={fps},scale={w}:{h},setsar=1,format=yuv420p,"
+          f"tpad=stop_mode=clone:stop_duration={dur:.3f},trim=duration={dur:.3f},setpts=PTS-STARTPTS")
+    tmp = d / "segment.tmp.mp4"
+    with tempfile.TemporaryDirectory(prefix="wbs-ass-") as td:
+        if captions and words:
+            ass = Path(td) / "c.ass"
+            ass.write_text(build_ass([(0.0, words)], w, h), encoding="utf-8")
+            vf += f",ass=filename={ass}:fontsdir={FONT_DIR}"
+        _run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-i", str(d / "clip.mp4"), "-vf", vf,
+              "-frames:v", str(frames), "-an", "-c:v", "libx264", "-preset", PRESET, "-crf", CRF,
+              "-pix_fmt", "yuv420p", "-r", str(fps), "-g", str(fps * 2), str(tmp)])
+    os.replace(tmp, seg)
+    kf.write_text(key, encoding="utf-8")
+    return seg
+
+def _narration(parts: list[tuple[Path, float]], out: Path) -> None:
+    """All scene voices back to back, each padded/trimmed to its scene length."""
+    chunks = []
+    for wav, dur in parts:
+        a, sr = sf.read(str(wav), dtype="float32", always_2d=True)
+        a = a.mean(axis=1)
+        if sr != SAMPLE_RATE:
+            idx = np.arange(int(len(a) * SAMPLE_RATE / sr)) * sr / SAMPLE_RATE
+            a = np.interp(idx, np.arange(len(a)), a).astype("float32")
+        n = round(dur * SAMPLE_RATE)
+        chunks.append(np.pad(a[:n], (0, max(0, n - len(a)))))
+    sf.write(str(out), np.concatenate(chunks) if chunks else np.zeros(1, "float32"), SAMPLE_RATE)
 
 def render_final(p: Project, vid: str, on_progress=None) -> Path:
+    """Incremental: unchanged scenes reuse their encoded segment; the final step only copies video."""
     v = versions.get(p, vid)
     pdir = store.project_dir(p.id)
     vd = versions.vdir(p.id, vid); vd.mkdir(parents=True, exist_ok=True)
@@ -105,60 +163,56 @@ def render_final(p: Project, vid: str, on_progress=None) -> Path:
     fps = config.FPS
     out = vd / "final.mp4"
     tmp_out = vd / "final.ffmpeg.tmp.mp4"
+    report = on_progress or (lambda f: None)
 
-    inputs: list[str] = []
-    vf, af = [], []
-    cap_scenes, spans = [], []
+    jobs, spans = [], []
     offset = 0.0
-    for i, s in enumerate(p.scenes):
-        vs = v.scenes[s.id]
+    for s in p.scenes:
         d = versions.vscene_dir(p.id, vid, s.id)
-        frames = math.ceil((vs.duration_ms or 0) * fps / 1000)
-        dur = frames / fps
-        inputs += ["-i", str(d / "clip.mp4"), "-i", str(d / "voice.wav")]
-        # pad/trim every scene to exactly its frame count so audio and video stay in lock-step
-        vf.append(f"[{2 * i}:v]fps={fps},scale={w}:{h},setsar=1,format=yuv420p,"
-                  f"tpad=stop_mode=clone:stop_duration={dur:.3f},trim=duration={dur:.3f},setpts=PTS-STARTPTS[v{i}]")
-        af.append(f"[{2 * i + 1}:a]aresample={SAMPLE_RATE},aformat=channel_layouts=stereo,"
-                  f"apad,atrim=duration={dur:.3f},asetpts=PTS-STARTPTS[a{i}]")
+        frames = math.ceil((v.scenes[s.id].duration_ms or 0) * fps / 1000)
         words = json.loads((d / "words.json").read_text(encoding="utf-8")) if (d / "words.json").exists() else []
-        cap_scenes.append((offset * 1000, words))
         if words:
             spans.append((offset * 1000 + words[0]["start_ms"], offset * 1000 + words[-1]["end_ms"]))
-        offset += dur
-    n = len(p.scenes)
-    total_ms = offset * 1000
-    graph = vf + af
-    graph.append("".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[vcat][acat]")
+        jobs.append((d, frames, words))
+        offset += frames / fps
 
-    vlast = "vcat"
-    with tempfile.TemporaryDirectory(prefix="wbs-ass-") as td:
-        if p.settings.captions:
-            ass = Path(td) / "captions.ass"
-            ass.write_text(build_ass(cap_scenes, w, h), encoding="utf-8")
-            graph.append(f"[vcat]ass=filename={ass}:fontsdir={FONT_DIR}[vout]")
-            vlast = "vout"
-        alast = "acat"
-        if p.settings.music and p.settings.music_file and (pdir / p.settings.music_file).exists():
-            inputs += ["-stream_loop", "-1", "-i", str(pdir / p.settings.music_file)]
-            graph.append(f"[{2 * n}:a]aresample={SAMPLE_RATE},aformat=channel_layouts=stereo,"
-                         f"atrim=duration={offset:.3f},volume='{_duck_expr(spans)}':eval=frame[mus]")
-            graph.append("[acat][mus]amix=inputs=2:duration=first:normalize=0[aout]")
-            alast = "aout"
-        cmd = ["ffmpeg", "-hide_banner", "-v", "error", "-y", *inputs,
-               "-filter_complex", ";".join(graph), "-map", f"[{vlast}]", "-map", f"[{alast}]",
-               "-c:v", "libx264", "-preset", PRESET, "-crf", CRF, "-pix_fmt", "yuv420p", "-r", str(fps),
-               "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
-               "-progress", "pipe:1", "-nostats", str(tmp_out)]
-        proc = procs.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        for line in proc.stdout:
-            m = _TIME.match(line.strip())
-            if on_progress and m and total_ms:
-                on_progress(min(1.0, int(m.group(1)) / 1000 / total_ms))
-        err = proc.stderr.read()
-        rc = proc.wait(); procs.done(proc)
-        if rc != 0 or not tmp_out.exists():
+    done = [0]
+    def seg(job):
+        d, frames, words = job
+        r = _segment(d, frames, fps, w, h, words, p.settings.captions)
+        done[0] += 1; report(0.9 * done[0] / max(1, len(jobs)))
+        return r
+
+    with tempfile.TemporaryDirectory(prefix="wbs-cat-") as td:
+        audio = Path(td) / "audio.m4a"
+        def encode_audio():
+            # narration (+ ducked music) is encoded once, alongside the video segments
+            narr = Path(td) / "narration.wav"
+            _narration([(d / "voice.wav", f / fps) for d, f, _ in jobs], narr)
+            cmd = ["ffmpeg", "-hide_banner", "-v", "error", "-y", "-i", str(narr)]
+            if p.settings.music and p.settings.music_file and (pdir / p.settings.music_file).exists():
+                cmd += ["-stream_loop", "-1", "-i", str(pdir / p.settings.music_file), "-filter_complex",
+                        f"[0:a]aformat=channel_layouts=stereo[voi];"
+                        f"[1:a]aresample={SAMPLE_RATE},aformat=channel_layouts=stereo,atrim=duration={offset:.3f},"
+                        f"volume='{_duck_expr(spans)}':eval=frame[mus];"
+                        "[voi][mus]amix=inputs=2:duration=first:normalize=0[aout]", "-map", "[aout]"]
+            else:
+                cmd += ["-ac", "2"]
+            _run(cmd + ["-c:a", "aac", "-aac_coder", "fast", "-b:a", "192k", str(audio)])
+        with ThreadPoolExecutor(max_workers=max(1, SEG_WORKERS) + 1) as ex:
+            fa = ex.submit(encode_audio)
+            segs = list(ex.map(seg, jobs))
+            fa.result()
+        lst = Path(td) / "list.txt"
+        lst.write_text("".join(f"file '{str(x).replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'\n"
+                               for x in segs), encoding="utf-8")
+        try:
+            _run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst),
+                  "-i", str(audio), "-map", "0:v", "-map", "1:a", "-c", "copy", "-t", f"{offset:.3f}",
+                  "-movflags", "+faststart", str(tmp_out)])
+        except Exception:
             tmp_out.unlink(missing_ok=True)
-            raise RuntimeError("ffmpeg lỗi khi ghép video:\n" + err[-1200:])
+            raise
     os.replace(tmp_out, out)
+    report(1.0)
     return out
